@@ -1,0 +1,41 @@
+[project]
+name = "mega-cli"
+version = "0.1.0"
+description = "IT-Softwareprojekt - MEGA CLI"
+readme = "README.md"
+authors = [
+    { name = "davis", email = "dwolfer@hs-mittweida.de" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "cryptography>=50.0.2",
+    "httpx2>=2.16.0",
+]
+
+[project.scripts]
+mega-cli = "mega_cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.1",
+    "ruff>=0.17.3",
+]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 100   # E501 only fires past this
+
+[tool.ruff.lint]
+# E/W = pycodestyle, F = pyflakes, I = isort, B = bugbear,
+# UP = pyupgrade, SIM = simplify
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+allow_redefinition = true
+strict = true
