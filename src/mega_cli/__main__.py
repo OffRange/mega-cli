@@ -1,4 +1,4 @@
-import mega_cli
+from mega_cli.cli import main
 
 if __name__ == "__main__":
-    mega_cli.main()
+    main()

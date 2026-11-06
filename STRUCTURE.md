@@ -5,7 +5,8 @@ Login, Verschlüsselung und Up-/Download, ohne das offizielle SDK).
 
 **Python:** >= 3.13\
 **Projektverwaltung:** uv\
-**Quellen:** [MEGA SDK](https://github.com/meganz/sdk), [MEGA Webclient](https://github.com/meganz/webclient), [mega-rs](https://github.com/Hirevo/mega-rs), [go-mega](https://github.com/t3rm1n4l/go-mega)
+**Quellen:** [MEGA SDK](https://github.com/meganz/sdk), [MEGA Webclient](https://github.com/meganz/webclient), [mega-rs](https://github.com/Hirevo/mega-rs), [go-mega](https://github.com/t3rm1n4l/go-mega)\
+**Codeguidelines:** Funktionen, Variablen, Kommentare, sowie Textausgabe in Englisch
 
 ---
 
@@ -41,8 +42,8 @@ mega-cli/
 │       │   └── hashcash.py    # proof-of-work solver for HTTP 402 / X-Hashcash
 │       ├── crypto/
 │       │   ├── __init__.py
-│       │   ├── encoding.py    # base64url, bytes <-> uint32 arrays
-│       │   ├── keys.py        # PBKDF2-HMAC-SHA512 (v2), prepare_key (v1), AES-ECB key wrapping
+│       │   ├── encoding.py    # base64url
+│       │   ├── keys.py        # PBKDF2-HMAC-SHA512 (v2), AES-ECB key wrapping
 │       │   ├── rsa.py         # MPI parsing, csid -> sid (raw RSA via pow(), see notes)
 │       │   ├── attributes.py  # encrypt/decrypt "MEGA{...}" attribute blobs
 │       │   └── filecrypto.py  # file key split, AES-CTR, chunk MAC, meta-MAC
@@ -104,7 +105,7 @@ HTTP-Mocking: `httpx2.MockTransport` oder `pytest-httpx2`.
 Einige beispiel CLI-Befehle, die unser Projekt unterstützen sollte:
 
 ```
-mega-cli login [<email>] [--password-stdin] [--no-save]
+mega-cli login [<email>]
 mega-cli logout
 
 mega-cli whoami
@@ -125,6 +126,6 @@ mega-cli share <file> [--remove]
 - **Meta-MAC:** Die Chunk-MACs sind AES-CBC-MACs; dafür AES-CBC mit Null-IV aus `cryptography` nutzen.
 - **Session-Sicherheit:** Der Master-Key gibt Zugriff auf alle Dateien. sid und Master-Key liegen deshalb im
   OS-Keyring (Windows Credential Manager, macOS Keychain, Linux Secret Service). Ohne Keyring (z. B. per SSH) Fallback
-  auf eine 0600-Datei mit Warnung; mega login --insecure-storage erzwingt die Datei.
+  auf eine 0600-Datei mit Warnung.
 - **Retries:** Fehlercode `-3` (EAGAIN) mit exponentiellem Backoff wiederholen, andere
   negative Codes sofort als `MegaError` werfen.
