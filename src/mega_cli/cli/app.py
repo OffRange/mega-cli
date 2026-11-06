@@ -41,19 +41,15 @@ def _setup_logger(verbose: bool) -> None:
 
 @app.callback()
 def root(
-        version: bool = typer.Option(
-            False,
-            "--version",
-            "-v",
-            help="Show the version",
-            callback=_version_callback,
-            is_eager=True,
-        ),
-        verbose: bool = typer.Option(
-            False,
-            "--verbose",
-            help="Show more detailed logs"
-        )
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-v",
+        help="Show the version",
+        callback=_version_callback,
+        is_eager=True,
+    ),
+    verbose: bool = typer.Option(False, "--verbose", help="Show more detailed logs"),
 ) -> None:
     _setup_logger(verbose)
 
