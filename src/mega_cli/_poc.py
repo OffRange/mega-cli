@@ -1,7 +1,19 @@
+"""Proof of concept for MEGA's login flow.
+
+Walks through MEGA's authentication end to end.
+Credentials are read from the ``EMAIL`` and ``PASSWORD`` environment variables.
+
+Run it with:
+
+- uv:    ``uv run --env-file .env python -m mega_cli._poc``
+- plain: ``python -m mega_cli._poc``
+"""
+
 import base64
 import json
 import logging
 import math
+import os
 from types import TracebackType
 from typing import Any, Self
 
@@ -57,10 +69,10 @@ class Client:
         self._http.close()
 
     def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: TracebackType | None,
     ) -> None:
         self.close()
 
@@ -102,8 +114,8 @@ class Client:
             raise Exception(f"Response is not JSON: {response.text[:200]!r}") from None
 
 
-EMAIL = "<email>"
-PASSWORD = "<pwd>"
+EMAIL = os.environ["EMAIL"]
+PASSWORD = os.environ["PASSWORD"]
 
 
 def b64dec(s: str) -> bytes:
@@ -129,13 +141,13 @@ def read_mpis(data: bytes, count: int) -> list[int]:
         if pos + 2 > data_len:
             raise ValueError("truncated MPI header")
 
-        bits = int.from_bytes(data[pos : pos + 2], "big")
+        bits = int.from_bytes(data[pos: pos + 2], "big")
         length = (bits + 7) // 8
         pos += 2
         if pos + length > data_len:
             raise ValueError("truncated MPI value")
 
-        values.append(int.from_bytes(data[pos : pos + length], "big"))
+        values.append(int.from_bytes(data[pos: pos + length], "big"))
         pos += length
 
     if data_len - pos >= 16:
@@ -189,8 +201,11 @@ def main() -> None:
             )
 
         sid = b64enc(sid)
-        print(f"SID: {sid}")
         api.sid = sid
 
         resp = api.send(user_data())
         print(json.dumps(resp, indent=2))
+
+
+if __name__ == '__main__':
+    main()
