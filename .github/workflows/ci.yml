@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, typecheck & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Check uv.lock is up to date
+        run: uv lock --check
+
+      - name: Install dependencies
+        id: sync
+        run: make sync
+
+      # Each check runs even if a previous one failed, so a single run
+      # reports every problem at once.
+      - name: Lint
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: make lint
+
+      - name: Format
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: make format
+
+      - name: Typecheck
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: make typecheck
+
+      - name: Test
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: make test
