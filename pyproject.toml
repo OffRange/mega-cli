@@ -10,10 +10,11 @@ requires-python = ">=3.13"
 dependencies = [
     "cryptography>=50.0.2",
     "httpx2>=2.16.0",
+    "typer==0.28.0",
 ]
 
 [project.scripts]
-mega-cli = "mega_cli:main"
+mega-cli = "mega_cli.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]
