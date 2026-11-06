@@ -17,14 +17,14 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def root(
-        version: bool = typer.Option(
-            False,
-            "--version",
-            "-v",
-            help="Show the version",
-            callback=_version_callback,
-            is_eager=True
-        ),
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-v",
+        help="Show the version",
+        callback=_version_callback,
+        is_eager=True,
+    ),
 ) -> None:
     pass
 
