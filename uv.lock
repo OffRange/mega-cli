@@ -416,6 +416,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
     { name = "httpx2" },
+    { name = "rich" },
     { name = "typer" },
 ]
 
@@ -430,6 +431,7 @@ dev = [
 requires-dist = [
     { name = "cryptography", specifier = ">=50.0.2" },
     { name = "httpx2", specifier = ">=2.16.0" },
+    { name = "rich", specifier = ">=15.0.0" },
     { name = "typer", specifier = "==0.28.0" },
 ]
 
