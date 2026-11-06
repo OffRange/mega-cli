@@ -5,7 +5,8 @@ Login, Verschlüsselung und Up-/Download, ohne das offizielle SDK).
 
 **Python:** >= 3.13\
 **Projektverwaltung:** uv\
-**Quellen:** [MEGA SDK](https://github.com/meganz/sdk), [MEGA Webclient](https://github.com/meganz/webclient), [mega-rs](https://github.com/Hirevo/mega-rs), [go-mega](https://github.com/t3rm1n4l/go-mega)
+**Quellen:** [MEGA SDK](https://github.com/meganz/sdk), [MEGA Webclient](https://github.com/meganz/webclient), [mega-rs](https://github.com/Hirevo/mega-rs), [go-mega](https://github.com/t3rm1n4l/go-mega)\
+**Codeguidelines:** Funktionen, Variablen, Kommentare, sowie Textausgabe in Englisch
 
 ---
 
