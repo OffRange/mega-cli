@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install sync lint format fmt typecheck check fix run clean
+.PHONY: help install sync lint format fmt typecheck test check fix run clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} \
@@ -28,9 +28,12 @@ format: ## Check formatting without writing changes
 	@uv run ruff format --check || { printf '\033[31mRun "make fix"\033[0m\n' >&2; exit 1; }
 
 typecheck: ## Run mypy in strict mode
-	uv run mypy src
+	uv run mypy src tests
 
-check: lint format typecheck ## Run everything CI runs
+test: ## Run the test suite
+	uv run pytest
+
+check: lint format typecheck test ## Run everything CI runs
 
 ## Fix Lint & Check findings
 fmt: ## Apply formatting
