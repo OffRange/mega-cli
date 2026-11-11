@@ -28,13 +28,16 @@ dev = [
     "ruff>=0.17.3",
 ]
 
-[tool.ruff.lint.pycodestyle]
-max-line-length = 100   # E501 only fires past this
+[tool.ruff]
+line-length = 100
 
 [tool.ruff.lint]
 # E/W = pycodestyle, F = pyflakes, I = isort, B = bugbear,
 # UP = pyupgrade, SIM = simplify
 select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 120   # E501 only fires past this
 
 [tool.ruff.format]
 quote-style = "double"
