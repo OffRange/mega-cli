@@ -16,8 +16,10 @@ from mega_cli.api.errors import (
     MegaProtocolError,
     MegaTransportError,
 )
+from mega_cli.logging import install_sid_redaction
 
 log = logging.getLogger(__name__)
+install_sid_redaction()
 
 DEFAULT_BASE_URL = "https://g.api.mega.co.nz"
 USER_AGENT = f"megacli/{__version__}"
