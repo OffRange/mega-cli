@@ -14,19 +14,13 @@ import json
 import logging
 import math
 import os
-from types import TracebackType
-from typing import Any, Self
 
-import httpx2
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from mega_cli import hashcash
-from mega_cli.api import BaseCommand, Field
+from mega_cli.api import BaseCommand, Field, MegaClient
 
-DEFAULT_BASE_URL = "https://g.api.mega.co.nz"
-MAX_HASHCASH_ROUNDS = 3
 SID_LENGTH = 43
 
 logging.basicConfig(
@@ -49,62 +43,6 @@ class Login(BaseCommand, name="us"):
 
 class UserData(BaseCommand, name="ug"):
     v: int = 1
-
-
-class Client:
-    def __init__(self, base_url: str = DEFAULT_BASE_URL):
-        self.base_url = base_url
-        self._http = httpx2.Client(base_url=base_url)
-
-        self.sid: str | None = None
-
-    def close(self) -> None:
-        self._http.close()
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def __enter__(self) -> Self:
-        return self
-
-    def _params(self) -> dict[str, str]:
-        params = {}
-        if self.sid:
-            params["sid"] = self.sid
-
-        return params
-
-    def send(self, command: BaseCommand) -> Any:
-        headers = {"Content-Type": "application/json"}
-        params = self._params()
-        for _ in range(MAX_HASHCASH_ROUNDS):
-            response = self._http.post(
-                "/cs", content=json.dumps([command.to_dict()]), params=params, headers=headers
-            )
-
-            if response.status_code != 402:
-                return self._decode(response)[0]
-
-            challenge = response.headers.get("x-hashcash")
-            if not challenge:
-                raise Exception("Request failed with 402")
-
-            log.debug("Solving hashcash challenge")
-            headers["x-hashcash"] = hashcash.solve_hashcash_challenge(challenge)
-
-        raise Exception("Server refused hashcat solution")
-
-    @staticmethod
-    def _decode(response: httpx2.Response) -> Any:
-        try:
-            return response.json()
-        except ValueError:
-            raise Exception(f"Response is not JSON: {response.text[:200]!r}") from None
 
 
 EMAIL = os.environ["EMAIL"]
@@ -160,8 +98,8 @@ def byte_length(n: int) -> int:
 
 
 def main() -> None:
-    with Client(base_url=DEFAULT_BASE_URL) as api:
-        salt = api.send(PreLogin(email=EMAIL))["s"]
+    with MegaClient() as api:
+        salt = api.request(PreLogin(email=EMAIL))["s"]
         salt = base64.urlsafe_b64decode(salt + "=" * (-len(salt) % 4))
 
         kdf = PBKDF2HMAC(hashes.SHA512(), 32, salt, 100_000)
@@ -170,7 +108,7 @@ def main() -> None:
         auth_key = key[16:]
         user_handle = base64.urlsafe_b64encode(auth_key).rstrip(b"=").decode()
 
-        resp = api.send(Login(email=EMAIL, user_handle=user_handle))
+        resp = api.request(Login(email=EMAIL, user_handle=user_handle))
         cipher = Cipher(algorithms.AES128(password_key), modes.ECB()).decryptor()
         master_key = cipher.update(b64dec(resp["k"])) + cipher.finalize()
 
@@ -195,7 +133,7 @@ def main() -> None:
         sid = b64enc(sid)
         api.sid = sid
 
-        resp = api.send(UserData())
+        resp = api.request(UserData())
         print(json.dumps(resp, indent=2))
 
 
