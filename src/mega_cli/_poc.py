@@ -29,8 +29,6 @@ DEFAULT_BASE_URL = "https://g.api.mega.co.nz"
 MAX_HASHCASH_ROUNDS = 3
 SID_LENGTH = 43
 
-type Command = dict[str, Any]
-
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -40,27 +38,17 @@ log = logging.getLogger(__name__)
 
 
 class PreLogin(BaseCommand, name="us0"):
-    email: str = Field(alias="user")
+    email: str = Field(api_alias="user")
 
 
-def prelogin(email: str) -> Command:
-    """Ask for the account version and salt. Response: ``{"v": 2, "s": "<salt>"}``."""
-    return {"a": "us0", "user": email}
+class Login(BaseCommand, name="us"):
+    email: str = Field(api_alias="user")
+    user_handle: str = Field(api_alias="uh")
+    mfa: str | None = None
 
 
-def login(email: str, user_hash: str, mfa_code: str | None = None) -> Command:
-    """Log in. ``user_hash`` is base64url(authKey).
-
-    Response has ``k``, ``privk``, ``csid`` and ``u``.
-    """
-    command: Command = {"a": "us", "user": email, "uh": user_hash}
-    if mfa_code:
-        command["mfa"] = mfa_code
-    return command
-
-
-def user_data() -> Command:
-    return {"a": "ug", "v": 1}
+class UserData(BaseCommand, name="ug"):
+    v: int = 1
 
 
 class Client:
@@ -91,12 +79,12 @@ class Client:
 
         return params
 
-    def send(self, command: Command) -> Any:
+    def send(self, command: BaseCommand) -> Any:
         headers = {"Content-Type": "application/json"}
         params = self._params()
         for _ in range(MAX_HASHCASH_ROUNDS):
             response = self._http.post(
-                "/cs", content=json.dumps([command]), params=params, headers=headers
+                "/cs", content=json.dumps([command.to_dict()]), params=params, headers=headers
             )
 
             if response.status_code != 402:
@@ -173,15 +161,16 @@ def byte_length(n: int) -> int:
 
 def main() -> None:
     with Client(base_url=DEFAULT_BASE_URL) as api:
-        salt = api.send(prelogin(EMAIL))["s"]
+        salt = api.send(PreLogin(email=EMAIL))["s"]
         salt = base64.urlsafe_b64decode(salt + "=" * (-len(salt) % 4))
 
         kdf = PBKDF2HMAC(hashes.SHA512(), 32, salt, 100_000)
         key = kdf.derive(PASSWORD.encode("utf-8"))
         password_key = key[:16]
-        auth_key = base64.urlsafe_b64encode(key[16:]).rstrip(b"=").decode()
+        auth_key = key[16:]
+        user_handle = base64.urlsafe_b64encode(auth_key).rstrip(b"=").decode()
 
-        resp = api.send(login(EMAIL, auth_key))
+        resp = api.send(Login(email=EMAIL, user_handle=user_handle))
         cipher = Cipher(algorithms.AES128(password_key), modes.ECB()).decryptor()
         master_key = cipher.update(b64dec(resp["k"])) + cipher.finalize()
 
@@ -206,7 +195,7 @@ def main() -> None:
         sid = b64enc(sid)
         api.sid = sid
 
-        resp = api.send(user_data())
+        resp = api.send(UserData())
         print(json.dumps(resp, indent=2))
 
 
