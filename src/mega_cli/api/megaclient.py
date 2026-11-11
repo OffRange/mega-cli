@@ -61,6 +61,14 @@ class MegaClient:
         self._sid: str | None = None
         """Session ID, set after login"""
 
+    @property
+    def sid(self) -> str | None:
+        return self._sid
+
+    @sid.setter
+    def sid(self, value: str | None) -> None:
+        self._sid = value
+
     def close(self) -> None:
         if self._owns_transport:
             self._http_client.close()
