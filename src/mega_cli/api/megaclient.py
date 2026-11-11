@@ -23,8 +23,6 @@ DEFAULT_BASE_URL = "https://g.api.mega.co.nz"
 USER_AGENT = f"megacli/{__version__}"
 
 MAX_HASHCASH_ROUNDS = 3
-INITIAL_BACKOFF = 1
-MAX_BACKOFF = 30
 
 type BatchResult = list[MegaApiError | httpx2.Response]
 
@@ -40,11 +38,20 @@ class MegaClient:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 30,
         max_retries: int = 7,
+        initial_backoff: float = 1,
+        max_backoff: float = 30,
         http_client: httpx2.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if max_retries < 0:
             raise ValueError(f"max_retries must not be negative, got {max_retries}")
+        if initial_backoff < 0:
+            raise ValueError(f"initial_backoff must not be negative, got {initial_backoff}")
+        if max_backoff < initial_backoff:
+            raise ValueError(
+                f"max_backoff ({max_backoff}) must not be smaller than "
+                f"initial_backoff ({initial_backoff})"
+            )
 
         self.base_url = base_url.rstrip("/")
         self._http_client = http_client or httpx2.Client(
@@ -52,6 +59,8 @@ class MegaClient:
         )
         self._owns_transport = http_client is None
         self._max_retries = max_retries
+        self._initial_backoff = initial_backoff
+        self._max_backoff = max_backoff
         self._sleep = sleep
 
         # The request id only has to be unique per session. So we take a random one so two CLI calls dont reuse one
@@ -123,7 +132,7 @@ class MegaClient:
         self._seq += 1
         params = self._params()
 
-        delay = INITIAL_BACKOFF
+        delay = self._initial_backoff
         last_error: MegaClientError | None = None
 
         for attempt in range(self._max_retries + 1):
@@ -136,7 +145,7 @@ class MegaClient:
                     last_error,
                 )
                 self._sleep(delay)
-                delay = min(delay * 2, MAX_BACKOFF)
+                delay = min(delay * 2, self._max_backoff)
 
             try:
                 response = self._send(body, params)
