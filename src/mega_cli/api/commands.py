@@ -1,21 +1,38 @@
-from dataclasses import asdict, dataclass
+import dataclasses
+from dataclasses import dataclass
+from typing import Any, ClassVar, dataclass_transform
 
 
-@dataclass
+# noinspection pep8-naming
+def Field(*, api_alias: str | None = None, **kwargs: Any) -> Any:
+    metadata = kwargs.pop("metadata", {})
+    if api_alias:
+        metadata["api_alias"] = api_alias
+
+    return dataclasses.field(metadata=metadata, **kwargs)
+
+
+@dataclass_transform(
+    kw_only_default=True, frozen_default=True, field_specifiers=(dataclasses.field, Field)
+)  # For type checkers and IDEs, so they know how subclasses should behave
 class BaseCommand:
     """Every command MEGA understands has this shared structure"""
 
-    a: str
+    name: ClassVar[str]
+    """The command name, sent as the ``a`` field"""
 
-    @property
-    def name(self) -> str:
-        return self.a
+    def __init_subclass__(cls, *, name: str, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        cls.name = name
+
+        # Enforce dataclass behavior
+        dataclass(frozen=True, kw_only=True)(cls)
 
     def to_dict(self) -> dict[str, str]:
-        return asdict(self)
+        data = {"a": self.name}
+        for field in dataclasses.fields(self):  # type: ignore[arg-type]
+            value = getattr(self, field.name)
+            api_alias = field.metadata.get("api_alias", field.name)
+            data[api_alias] = value
 
-    def get(self, key: str, default: str) -> str:
-        return asdict(self).get(key, default)
-
-    def __getitem__(self, key) -> str:
-        return asdict(self)[key]
+        return data

@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from mega_cli import hashcash
+from mega_cli.api import BaseCommand, Field
 
 DEFAULT_BASE_URL = "https://g.api.mega.co.nz"
 MAX_HASHCASH_ROUNDS = 3
@@ -36,6 +37,10 @@ logging.basicConfig(
 )
 
 log = logging.getLogger(__name__)
+
+
+class PreLogin(BaseCommand, name="us0"):
+    email: str = Field(alias="user")
 
 
 def prelogin(email: str) -> Command:
@@ -196,9 +201,7 @@ def main() -> None:
 
         # Check user handle
         if sid[16:27].decode("ascii", "replace") != resp["u"]:
-            raise SystemExit(
-                "Session check failed: wrong password or unexpected server response."
-            )
+            raise SystemExit("Session check failed: wrong password or unexpected server response.")
 
         sid = b64enc(sid)
         api.sid = sid
