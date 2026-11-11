@@ -26,8 +26,7 @@ MAX_HASHCASH_ROUNDS = 3
 INITIAL_BACKOFF = 1
 MAX_BACKOFF = 30
 
-type Result = MegaApiError | Any
-type BatchResult = list[Result]
+type BatchResult = list[MegaApiError | httpx2.Response]
 
 
 def _is_error_code(v: object) -> TypeGuard[int]:
@@ -84,12 +83,13 @@ class MegaClient:
     ) -> None:
         self.close()
 
-    def request(self, command: BaseCommand) -> Result:
+    def request[R](self, command: BaseCommand[R]) -> R:
         (result,) = self.request_batch([command])
         if isinstance(result, MegaApiError):
             raise result
 
-        return result
+        # parsed by command.parse_response in request_batch
+        return result  # type: ignore[return-value]
 
     def request_batch(self, commands: Sequence[BaseCommand]) -> BatchResult:
         if not commands:
@@ -98,7 +98,9 @@ class MegaClient:
         data = self._post(commands)
         if isinstance(data, list) and len(data) == len(commands):
             return [
-                MegaApiError(item, [type(cmd)]) if _is_error_code(item) else item
+                MegaApiError(item, [type(cmd)])
+                if _is_error_code(item)
+                else cmd.parse_response(item)
                 for item, cmd in zip(data, commands, strict=True)
             ]
 

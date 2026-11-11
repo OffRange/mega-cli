@@ -1,6 +1,7 @@
 import dataclasses
 from dataclasses import dataclass
-from typing import Any, ClassVar, dataclass_transform
+from types import get_original_bases
+from typing import Any, ClassVar, dataclass_transform, get_args
 
 
 # noinspection pep8-naming
@@ -15,15 +16,19 @@ def Field(*, api_alias: str | None = None, **kwargs: Any) -> Any:
 @dataclass_transform(
     kw_only_default=True, frozen_default=True, field_specifiers=(dataclasses.field, Field)
 )  # For type checkers and IDEs, so they know how subclasses should behave
-class BaseCommand:
+class BaseCommand[Response = Any]:
     """Every command MEGA understands has this shared structure"""
 
     name: ClassVar[str]
     """The command name, sent as the ``a`` field"""
 
+    response_type: ClassVar[Any]
+    """The ``X`` in ``BaseCommand[X]``, or ``None``"""
+
     def __init_subclass__(cls, *, name: str, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         cls.name = name
+        (cls.response_type,) = get_args(get_original_bases(cls)[0]) or (None,)
 
         # Enforce dataclass behavior
         dataclass(frozen=True, kw_only=True)(cls)
@@ -36,3 +41,13 @@ class BaseCommand:
             data[api_alias] = value
 
         return data
+
+    @classmethod
+    def parse_response(cls, raw: Any) -> Response:
+        rt = cls.response_type
+        if not isinstance(rt, type) or not dataclasses.is_dataclass(rt):
+            return raw  # type: ignore[no-any-return]
+
+        aliases = {f.name: f.metadata.get("api_alias", f.name) for f in dataclasses.fields(rt)}
+        kwargs = {name: raw[alias] for name, alias in aliases.items() if alias in raw}
+        return rt(**kwargs)  # type: ignore[return-value]

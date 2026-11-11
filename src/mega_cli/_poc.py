@@ -14,6 +14,7 @@ import json
 import logging
 import math
 import os
+from dataclasses import dataclass
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -31,11 +32,27 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-class PreLogin(BaseCommand, name="us0"):
+@dataclass
+class PreLoginResponse:
+    salt: str = Field(api_alias="s")
+
+
+class PreLogin(BaseCommand[PreLoginResponse], name="us0"):
     email: str = Field(api_alias="user")
 
 
-class Login(BaseCommand, name="us"):
+@dataclass
+class LoginResponse:
+    master_key: str = Field(api_alias="k")
+    """Master key, encrypted with the password key"""
+    private_key: str = Field(api_alias="privk")
+    """RSA private key, encrypted with the master key"""
+    encrypted_sid: str = Field(api_alias="csid")
+    """Session ID, encrypted with the RSA public key"""
+    user_handle: str = Field(api_alias="u")
+
+
+class Login(BaseCommand[LoginResponse], name="us"):
     email: str = Field(api_alias="user")
     user_handle: str = Field(api_alias="uh")
     mfa: str | None = None
@@ -99,7 +116,7 @@ def byte_length(n: int) -> int:
 
 def main() -> None:
     with MegaClient() as api:
-        salt = api.request(PreLogin(email=EMAIL))["s"]
+        salt = api.request(PreLogin(email=EMAIL)).salt
         salt = base64.urlsafe_b64decode(salt + "=" * (-len(salt) % 4))
 
         kdf = PBKDF2HMAC(hashes.SHA512(), 32, salt, 100_000)
@@ -110,13 +127,13 @@ def main() -> None:
 
         resp = api.request(Login(email=EMAIL, user_handle=user_handle))
         cipher = Cipher(algorithms.AES128(password_key), modes.ECB()).decryptor()
-        master_key = cipher.update(b64dec(resp["k"])) + cipher.finalize()
+        master_key = cipher.update(b64dec(resp.master_key)) + cipher.finalize()
 
         cipher = Cipher(algorithms.AES128(master_key), modes.ECB()).decryptor()
-        rsa_priv = cipher.update(b64dec(resp["privk"])) + cipher.finalize()
+        rsa_priv = cipher.update(b64dec(resp.private_key)) + cipher.finalize()
         prime1, prime2, d, _u = read_mpis(rsa_priv, 4)
 
-        (ciphertext,) = read_mpis(b64dec(resp["csid"]), 1)
+        (ciphertext,) = read_mpis(b64dec(resp.encrypted_sid), 1)
         plain = pow(ciphertext, d, prime1 * prime2)
 
         # https://github.com/meganz/sdk/blob/2c95a487b4b297dba1d792c88189d432c3452694/src/crypto/cryptopp.cpp#L1147-L1159
@@ -127,7 +144,7 @@ def main() -> None:
         sid = plain.to_bytes(width, "big")[:SID_LENGTH]
 
         # Check user handle
-        if sid[16:27].decode("ascii", "replace") != resp["u"]:
+        if sid[16:27].decode("ascii", "replace") != resp.user_handle:
             raise SystemExit("Session check failed: wrong password or unexpected server response.")
 
         sid = b64enc(sid)
