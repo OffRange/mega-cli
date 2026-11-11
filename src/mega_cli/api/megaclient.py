@@ -156,12 +156,10 @@ class MegaClient:
                 last_error.__cause__ = e
                 continue
 
-            if response.status_code >= 500:
-                last_error = MegaTransportError(f"Server error: HTTP {response.status_code}")
-                continue
-
             if response.status_code != 200:
-                raise MegaTransportError(f"Unexpected HTTP {response.status_code}")
+                kind = "Server error" if response.status_code >= 500 else "Unexpected status"
+                last_error = MegaTransportError(f"{kind}: HTTP {response.status_code}")
+                continue
 
             data = self._decode(response)
 
