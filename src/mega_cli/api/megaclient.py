@@ -95,16 +95,14 @@ class MegaClient:
         if not commands:
             return []
 
-        names = [cmd.name for cmd in commands]
-        body = json.dumps([cmd.to_dict() for cmd in commands])
-
-        data = self._post(body, names)
+        data = self._post(commands)
         if isinstance(data, list) and len(data) == len(commands):
             return [
-                MegaApiError(item, name) if _is_error_code(item) else item
-                for item, name in zip(data, names, strict=True)
+                MegaApiError(item, [type(cmd)]) if _is_error_code(item) else item
+                for item, cmd in zip(data, commands, strict=True)
             ]
 
+        names = [cmd.name for cmd in commands]
         raise MegaProtocolError(
             f"Expected a list of {len(commands)} results for {names}, got {data!r:.200}"
         )
@@ -116,7 +114,10 @@ class MegaClient:
 
         return params
 
-    def _post(self, body: str, names: list[str]) -> Any:
+    def _post(self, commands: Sequence[BaseCommand]) -> Any:
+        body = json.dumps([cmd.to_dict() for cmd in commands])
+        classes = [type(cmd) for cmd in commands]
+
         self._seq += 1
         params = self._params()
 
@@ -152,7 +153,7 @@ class MegaClient:
             data = self._decode(response)
 
             if _is_error_code(data):  # Entire response got an error
-                error = MegaApiError(data, ",".join(names))
+                error = MegaApiError(data, classes)
                 if error.is_retryable:
                     last_error = error
                     continue

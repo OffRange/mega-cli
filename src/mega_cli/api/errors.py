@@ -1,4 +1,7 @@
+from collections.abc import Sequence
 from enum import IntEnum
+
+from mega_cli.api import BaseCommand
 
 
 class MegaErrorCode(IntEnum):
@@ -58,10 +61,11 @@ class MegaProtocolError(MegaClientError):
 class MegaApiError(MegaClientError):
     """Exception for MEGA specific errors"""
 
-    def __init__(self, code: int, command: str | None = None):
-        super().__init__(code, command)
+    def __init__(self, code: int, commands: Sequence[type[BaseCommand]] = ()):
+        super().__init__(code, tuple(commands))
         self.code = code
-        self.command = command
+        self.commands = tuple(commands)
+        """Command classes the error belongs to. More than one for a batch-level error"""
 
         try:
             known: MegaErrorCode | None = MegaErrorCode(code)
@@ -72,7 +76,10 @@ class MegaApiError(MegaClientError):
     def __str__(self) -> str:
         name = self.error.name if self.error else "UNKNOWN"
         msg = self.error.description if self.error else "Unknown error"
-        where = f" in command '{self.command}'" if self.command else ""
+        where = ""
+        if self.commands:
+            labels = ", ".join(f"{cmd.__name__} ('{cmd.name}')" for cmd in self.commands)
+            where = f" in command {labels}"
         return f"{name} ({self.code}){where}: {msg}"
 
     @property
