@@ -8,7 +8,7 @@ import httpx2
 import pytest
 
 from mega_cli.api import BaseCommand, Field, MegaClient
-from mega_cli.api.errors import MegaApiError, MegaErrorCode
+from mega_cli.api.errors import MegaApiError, MegaErrorCode, MegaTransportError
 
 BASE_URL = "https://test.example.mega"
 SECRET_SID = "SeCrEtSiD-do-not-log-0123456789abcdef"
@@ -31,7 +31,11 @@ class FakeServer:
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
-        return httpx2.Response(200, json=self.replies.pop(0))
+        reply = self.replies.pop(0)
+        if isinstance(reply, httpx2.Response):
+            return reply
+
+        return httpx2.Response(200, json=reply)
 
     @property
     def ids(self) -> list[str | None]:
@@ -151,7 +155,14 @@ def test_backoff_is_exponential_and_capped(
     assert sleeps == [0.5, 1, 2, 3, 3]
 
 
-@pytest.mark.parametrize("code", [code for code in MegaErrorCode if code != MegaErrorCode.EAGAIN])
+@pytest.mark.parametrize(
+    "code",
+    [
+        code
+        for code in MegaErrorCode
+        if code != MegaErrorCode.EAGAIN and code != MegaErrorCode.ERATELIMIT
+    ],
+)
 def test_non_eagain_raises_immediately(
     make_client: Callable[..., Any], sleeps: list[float], code: int
 ) -> None:
@@ -162,6 +173,34 @@ def test_non_eagain_raises_immediately(
     assert exc.value.code == code
     assert len(server.requests) == 1
     assert sleeps == []
+
+
+# --- HTTP status retries ----------------------------------------------------------------------
+@pytest.mark.parametrize("status", [400, 403, 404, 429, 500, 503])
+def test_non_200_status_is_retried(
+    make_client: Callable[..., Any], sleeps: list[float], status: int
+) -> None:
+    client, server = make_client(httpx2.Response(status), [{"ok": 1}])
+
+    assert client.request(Ping()) == {"ok": 1}
+    assert len(server.requests) == 2
+    assert len(sleeps) == 1
+    assert len(set(server.ids)) == 1  # retry reuses the request id
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [(404, "Unexpected status: HTTP 404"), (502, "Server error: HTTP 502")],
+)
+def test_permanent_non_200_raises_after_max_retries(
+    make_client: Callable[..., Any], sleeps: list[float], status: int, message: str
+) -> None:
+    client, server = make_client(*[httpx2.Response(status)] * 3, max_retries=2)
+    with pytest.raises(MegaTransportError, match=message):
+        client.request(Ping())
+
+    assert len(server.requests) == 3  # first attempt + 2 retries
+    assert len(sleeps) == 2
 
 
 @pytest.mark.parametrize(
