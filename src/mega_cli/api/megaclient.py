@@ -2,7 +2,7 @@ import json
 import logging
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from types import TracebackType
 from typing import Any, Self, TypeGuard
 
@@ -26,7 +26,8 @@ MAX_HASHCASH_ROUNDS = 3
 INITIAL_BACKOFF = 1
 MAX_BACKOFF = 30
 
-type Result = list[MegaApiError | Any]
+type Result = MegaApiError | Any
+type BatchResult = list[Result]
 
 
 def _is_error_code(v: object) -> TypeGuard[int]:
@@ -76,7 +77,16 @@ class MegaClient:
         self.close()
 
     def request(self, command: BaseCommand) -> Result:
-        commands = [command]
+        (result,) = self.request_batch([command])
+        if isinstance(result, MegaApiError):
+            raise result
+
+        return result
+
+    def request_batch(self, commands: Sequence[BaseCommand]) -> BatchResult:
+        if not commands:
+            return []
+
         names = [cmd.name for cmd in commands]
         body = json.dumps([cmd.to_dict() for cmd in commands])
 
