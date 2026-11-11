@@ -43,7 +43,7 @@ _DESCRIPTIONS: dict[MegaErrorCode, str] = {
     MegaErrorCode.EMFAREQUIRED: "MFA required",
 }
 
-_RETRYABLE = frozenset({MegaErrorCode.EAGAIN, MegaErrorCode.ERATELIMIT})
+_RETRYABLE = frozenset({MegaErrorCode.EAGAIN})
 
 
 class MegaClientError(Exception):
