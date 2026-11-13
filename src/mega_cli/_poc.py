@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class PreLoginResponse:
-    salt: str = Field(api_alias="s")
+    salt: str = Field(api_alias="s", default=None)
 
 
 class PreLogin(BaseCommand[PreLoginResponse], name="us0"):

@@ -48,6 +48,30 @@ class BaseCommand[Response = Any]:
         if not isinstance(rt, type) or not dataclasses.is_dataclass(rt):
             return raw  # type: ignore[no-any-return]
 
-        aliases = {f.name: f.metadata.get("api_alias", f.name) for f in dataclasses.fields(rt)}
+        from mega_cli.api.errors import MegaProtocolError
+
+        if not isinstance(raw, dict):
+            raise MegaProtocolError(
+                f"Expected an object for {cls.name!r} ({rt.__name__}), got {raw!r:.200}"
+            )
+
+        fields = dataclasses.fields(rt)
+        aliases = {f.name: f.metadata.get("api_alias", f.name) for f in fields}
+
+        # Extra keys from the API are ignored; only required fields (no default) must be present
+        missing = [
+            aliases[f.name]
+            for f in fields
+            if f.init
+            and f.default is dataclasses.MISSING
+            and f.default_factory is dataclasses.MISSING
+            and aliases[f.name] not in raw
+        ]
+        if missing:
+            raise MegaProtocolError(
+                f"Response for {cls.name!r} ({rt.__name__}) is missing required fields "
+                f"{missing}, got {raw!r:.200}"
+            )
+
         kwargs = {name: raw[alias] for name, alias in aliases.items() if alias in raw}
         return rt(**kwargs)  # type: ignore[return-value]
