@@ -14,21 +14,15 @@ import json
 import logging
 import math
 import os
-from types import TracebackType
-from typing import Any, Self
+from dataclasses import dataclass
 
-import httpx2
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from mega_cli import hashcash
+from mega_cli.api import BaseCommand, Field, MegaClient
 
-DEFAULT_BASE_URL = "https://g.api.mega.co.nz"
-MAX_HASHCASH_ROUNDS = 3
 SID_LENGTH = 43
-
-type Command = dict[str, Any]
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -38,80 +32,34 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def prelogin(email: str) -> Command:
-    """Ask for the account version and salt. Response: ``{"v": 2, "s": "<salt>"}``."""
-    return {"a": "us0", "user": email}
+@dataclass
+class PreLoginResponse:
+    salt: str = Field(api_alias="s", default=None)
 
 
-def login(email: str, user_hash: str, mfa_code: str | None = None) -> Command:
-    """Log in. ``user_hash`` is base64url(authKey).
-
-    Response has ``k``, ``privk``, ``csid`` and ``u``.
-    """
-    command: Command = {"a": "us", "user": email, "uh": user_hash}
-    if mfa_code:
-        command["mfa"] = mfa_code
-    return command
+class PreLogin(BaseCommand[PreLoginResponse], name="us0"):
+    email: str = Field(api_alias="user")
 
 
-def user_data() -> Command:
-    return {"a": "ug", "v": 1}
+@dataclass
+class LoginResponse:
+    master_key: str = Field(api_alias="k")
+    """Master key, encrypted with the password key"""
+    private_key: str = Field(api_alias="privk")
+    """RSA private key, encrypted with the master key"""
+    encrypted_sid: str = Field(api_alias="csid")
+    """Session ID, encrypted with the RSA public key"""
+    user_handle: str = Field(api_alias="u")
 
 
-class Client:
-    def __init__(self, base_url: str = DEFAULT_BASE_URL):
-        self.base_url = base_url
-        self._http = httpx2.Client(base_url=base_url)
+class Login(BaseCommand[LoginResponse], name="us"):
+    email: str = Field(api_alias="user")
+    user_handle: str = Field(api_alias="uh")
+    mfa: str | None = None
 
-        self.sid: str | None = None
 
-    def close(self) -> None:
-        self._http.close()
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        self.close()
-
-    def __enter__(self) -> Self:
-        return self
-
-    def _params(self) -> dict[str, str]:
-        params = {}
-        if self.sid:
-            params["sid"] = self.sid
-
-        return params
-
-    def send(self, command: Command) -> Any:
-        headers = {"Content-Type": "application/json"}
-        params = self._params()
-        for _ in range(MAX_HASHCASH_ROUNDS):
-            response = self._http.post(
-                "/cs", content=json.dumps([command]), params=params, headers=headers
-            )
-
-            if response.status_code != 402:
-                return self._decode(response)[0]
-
-            challenge = response.headers.get("x-hashcash")
-            if not challenge:
-                raise Exception("Request failed with 402")
-
-            log.debug("Solving hashcash challenge")
-            headers["x-hashcash"] = hashcash.solve_hashcash_challenge(challenge)
-
-        raise Exception("Server refused hashcat solution")
-
-    @staticmethod
-    def _decode(response: httpx2.Response) -> Any:
-        try:
-            return response.json()
-        except ValueError:
-            raise Exception(f"Response is not JSON: {response.text[:200]!r}") from None
+class UserData(BaseCommand, name="ug"):
+    v: int = 1
 
 
 EMAIL = os.environ["EMAIL"]
@@ -167,24 +115,25 @@ def byte_length(n: int) -> int:
 
 
 def main() -> None:
-    with Client(base_url=DEFAULT_BASE_URL) as api:
-        salt = api.send(prelogin(EMAIL))["s"]
+    with MegaClient() as api:
+        salt = api.request(PreLogin(email=EMAIL)).salt
         salt = base64.urlsafe_b64decode(salt + "=" * (-len(salt) % 4))
 
         kdf = PBKDF2HMAC(hashes.SHA512(), 32, salt, 100_000)
         key = kdf.derive(PASSWORD.encode("utf-8"))
         password_key = key[:16]
-        auth_key = base64.urlsafe_b64encode(key[16:]).rstrip(b"=").decode()
+        auth_key = key[16:]
+        user_handle = base64.urlsafe_b64encode(auth_key).rstrip(b"=").decode()
 
-        resp = api.send(login(EMAIL, auth_key))
+        resp = api.request(Login(email=EMAIL, user_handle=user_handle))
         cipher = Cipher(algorithms.AES128(password_key), modes.ECB()).decryptor()
-        master_key = cipher.update(b64dec(resp["k"])) + cipher.finalize()
+        master_key = cipher.update(b64dec(resp.master_key)) + cipher.finalize()
 
         cipher = Cipher(algorithms.AES128(master_key), modes.ECB()).decryptor()
-        rsa_priv = cipher.update(b64dec(resp["privk"])) + cipher.finalize()
+        rsa_priv = cipher.update(b64dec(resp.private_key)) + cipher.finalize()
         prime1, prime2, d, _u = read_mpis(rsa_priv, 4)
 
-        (ciphertext,) = read_mpis(b64dec(resp["csid"]), 1)
+        (ciphertext,) = read_mpis(b64dec(resp.encrypted_sid), 1)
         plain = pow(ciphertext, d, prime1 * prime2)
 
         # https://github.com/meganz/sdk/blob/2c95a487b4b297dba1d792c88189d432c3452694/src/crypto/cryptopp.cpp#L1147-L1159
@@ -195,15 +144,13 @@ def main() -> None:
         sid = plain.to_bytes(width, "big")[:SID_LENGTH]
 
         # Check user handle
-        if sid[16:27].decode("ascii", "replace") != resp["u"]:
-            raise SystemExit(
-                "Session check failed: wrong password or unexpected server response."
-            )
+        if sid[16:27].decode("ascii", "replace") != resp.user_handle:
+            raise SystemExit("Session check failed: wrong password or unexpected server response.")
 
         sid = b64enc(sid)
         api.sid = sid
 
-        resp = api.send(user_data())
+        resp = api.request(UserData())
         print(json.dumps(resp, indent=2))
 
 
