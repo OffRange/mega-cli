@@ -1,6 +1,14 @@
+import traceback
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import Any
+
+import typer
+from rich.console import Console
+from rich.text import Text
+from typer import _click
+from typer.core import TyperGroup
 
 from mega_cli import CLI_NAME
 from mega_cli.api import BaseCommand
@@ -106,7 +114,7 @@ class UserError:
 
 
 _LOGIN_HINT = f"Run `{CLI_NAME} login` to sign in again."
-API_ERRORS: dict[MegaErrorCode, UserError] = {
+API_ERRORS: dict[MegaErrorCode | None, UserError] = {
     MegaErrorCode.EINTERNAL: UserError(
         "MEGA reported an internal error. Try later again.", ExitCode.GENERAL
     ),
@@ -128,4 +136,78 @@ API_ERRORS: dict[MegaErrorCode, UserError] = {
         ExitCode.QUOTA,
     ),
     MegaErrorCode.EMFAREQUIRED: UserError("Two-factor authentication is required.", ExitCode.AUTH),
+    None: UserError("MEGA returned an unknown error code: <code>.", ExitCode.GENERAL),
 }
+
+COMMAND_OVERRIDES: dict[tuple[str, MegaErrorCode | None], UserError] = {
+    ("us", MegaErrorCode.ENOENT): UserError("Wrong email or password.", ExitCode.AUTH),
+}
+
+VERBOSE_KEY = "mega_cli.verbose"
+
+
+def _describe(e: MegaClientError) -> UserError:
+    if isinstance(e, MegaApiError):
+        for cmd in e.commands:
+            if override := COMMAND_OVERRIDES.get((cmd.name, e.error)):
+                return override
+
+        user_error = API_ERRORS[e.error]
+        user_error = UserError(
+            user_error.message.replace("<code>", str(e.code)), user_error.exit_code
+        )
+        return user_error
+
+    elif isinstance(e, MegaTransportError):
+        return UserError(f"{e}. Check your internet connection.", ExitCode.NETWORK)
+
+    elif isinstance(e, MegaProtocolError):
+        return UserError("MEGA sent an unexpected response.", ExitCode.GENERAL)
+
+    return UserError("An unexpected error occurred.", ExitCode.GENERAL)
+
+
+def report(e: MegaClientError, *, verbose: bool, console: Console) -> ExitCode:
+    user_error = _describe(e)
+    if verbose:
+        _print_stacktrace(e, console)
+
+    _print_error_line(user_error.message, console)
+    return user_error.exit_code
+
+
+def report_unexpected(exc: Exception, *, verbose: bool, console: Console) -> ExitCode:
+    if verbose:
+        _print_stacktrace(exc, console)
+
+    _print_error_line(
+        f"Unexpected error ({type(exc).__name__}). Re-run with --verbose and report it.",
+        console,
+    )
+    return ExitCode.GENERAL
+
+
+def _print_stacktrace(e: BaseException, console: Console) -> None:
+    tb = "".join(traceback.format_exception(e))  # stdlib: never includes locals
+    console.print(tb, markup=False, highlight=False, soft_wrap=True)  # TODO: redact
+
+
+def _print_error_line(message: str, console: Console) -> None:
+    # TODO: redact message
+    console.print(Text.assemble(("Error: ", "bold red"), message), soft_wrap=True)
+
+
+class MegaErrorHandlerGroup(TyperGroup):
+    def invoke(self, ctx: _click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        except (typer.TyperException, typer.Exit, typer.Abort):
+            raise  # Click's own control flow and usage errors: leave untouched
+        except MegaClientError as e:
+            verbose = bool(ctx.meta.get(VERBOSE_KEY, False))
+            raise typer.Exit(report(e, verbose=verbose, console=Console(stderr=True))) from None
+        except Exception as e:
+            verbose = bool(ctx.meta.get(VERBOSE_KEY, False))
+            raise typer.Exit(
+                report_unexpected(e, verbose=verbose, console=Console(stderr=True))
+            ) from None

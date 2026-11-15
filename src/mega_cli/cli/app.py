@@ -9,8 +9,14 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from mega_cli import CLI_NAME, __version__
+from mega_cli.api.errors import VERBOSE_KEY, MegaErrorHandlerGroup
 
-app = typer.Typer(no_args_is_help=True, help=__doc__)
+app = typer.Typer(
+    cls=MegaErrorHandlerGroup,
+    no_args_is_help=True,
+    help=__doc__,
+    pretty_exceptions_show_locals=False,
+)
 
 
 def _version_callback(value: bool) -> None:
@@ -41,6 +47,7 @@ def _setup_logger(verbose: bool) -> None:
 
 @app.callback()
 def root(
+    ctx: typer.Context,
     version: bool = typer.Option(
         False,
         "--version",
@@ -51,6 +58,7 @@ def root(
     ),
     verbose: bool = typer.Option(False, "--verbose", help="Show more detailed logs"),
 ) -> None:
+    ctx.meta[VERBOSE_KEY] = verbose
     _setup_logger(verbose)
 
 
