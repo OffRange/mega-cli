@@ -1,6 +1,8 @@
 from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import IntEnum
 
+from mega_cli import CLI_NAME
 from mega_cli.api import BaseCommand
 
 
@@ -85,3 +87,45 @@ class MegaApiError(MegaClientError):
     @property
     def is_retryable(self) -> bool:
         return self.error is not None and self.error.is_retryable
+
+
+class ExitCode(IntEnum):
+    OK = 0
+    GENERAL = 1
+    USAGE = 2  # Click already uses this for bad arguments and options
+    AUTH = 3
+    NOT_FOUND = 4
+    QUOTA = 5
+    NETWORK = 6
+
+
+@dataclass(frozen=True)
+class UserError:
+    message: str
+    exit_code: ExitCode
+
+
+_LOGIN_HINT = f"Run `{CLI_NAME} login` to sign in again."
+API_ERRORS: dict[MegaErrorCode, UserError] = {
+    MegaErrorCode.EINTERNAL: UserError(
+        "MEGA reported an internal error. Try later again.", ExitCode.GENERAL
+    ),
+    MegaErrorCode.EARGS: UserError(
+        f"MEGA rejected the request. This is likely a bug in {CLI_NAME}", ExitCode.GENERAL
+    ),
+    MegaErrorCode.EAGAIN: UserError(
+        "MEGA is temporarily unavailable. Try later again.", ExitCode.NETWORK
+    ),
+    MegaErrorCode.ERATELIMIT: UserError(
+        "Too many requests to MEGA. try later again.", ExitCode.NETWORK
+    ),
+    MegaErrorCode.EFAILED: UserError("The request failed on MEGA's side", ExitCode.GENERAL),
+    MegaErrorCode.ENOENT: UserError("Not found.", ExitCode.NOT_FOUND),
+    MegaErrorCode.EACCESS: UserError("Access denied", ExitCode.AUTH),
+    MegaErrorCode.ESID: UserError(f"Your session has expired. {_LOGIN_HINT}", ExitCode.AUTH),
+    MegaErrorCode.EOVERQUOTA: UserError(
+        "Quota exceeded: your storage is full. Free up space.",
+        ExitCode.QUOTA,
+    ),
+    MegaErrorCode.EMFAREQUIRED: UserError("Two-factor authentication is required.", ExitCode.AUTH),
+}
