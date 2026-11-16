@@ -196,9 +196,7 @@ def main() -> None:
 
         # Check user handle
         if sid[16:27].decode("ascii", "replace") != resp["u"]:
-            raise SystemExit(
-                "Session check failed: wrong password or unexpected server response."
-            )
+            raise SystemExit("Session check failed: wrong password or unexpected server response.")
 
         sid = b64enc(sid)
         api.sid = sid
