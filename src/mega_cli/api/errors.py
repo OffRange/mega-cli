@@ -12,6 +12,7 @@ from typer.core import TyperGroup
 
 from mega_cli import CLI_NAME
 from mega_cli.api import BaseCommand
+from mega_cli.logging import redact
 
 
 class MegaErrorCode(IntEnum):
@@ -190,12 +191,11 @@ def report_unexpected(exc: Exception, *, verbose: bool, console: Console) -> Exi
 
 def _print_stacktrace(e: BaseException, console: Console) -> None:
     tb = "".join(traceback.format_exception(e))  # stdlib: never includes locals
-    console.print(tb, markup=False, highlight=False, soft_wrap=True)  # TODO: redact
+    console.print(redact(tb), markup=False, highlight=False, soft_wrap=True)
 
 
 def _print_error_line(message: str, console: Console) -> None:
-    # TODO: redact message
-    console.print(Text.assemble(("Error: ", "bold red"), message), soft_wrap=True)
+    console.print(Text.assemble(("Error: ", "bold red"), redact(message)), soft_wrap=True)
 
 
 class MegaErrorHandlerGroup(TyperGroup):

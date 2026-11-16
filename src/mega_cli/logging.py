@@ -4,6 +4,10 @@ import re
 _SID_PARAM = re.compile(r"([?&]sid=)[^&\s\"']*")
 
 
+def redact(msg: str) -> str:
+    return _SID_PARAM.sub(r"\1<redacted>", msg)
+
+
 class RedactSidFilter(logging.Filter):
     """Removes the ``sid`` query parameter from log messages.
 
@@ -12,7 +16,7 @@ class RedactSidFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        redacted = _SID_PARAM.sub(r"\1<redacted>", message)
+        redacted = redact(message)
         if redacted != message:
             record.msg, record.args = redacted, None
         return True
