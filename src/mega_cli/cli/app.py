@@ -29,7 +29,7 @@ def _setup_logger(verbose: bool) -> None:
     handler = RichHandler(
         console=Console(stderr=True),
         rich_tracebacks=True,
-        tracebacks_show_locals=verbose,
+        tracebacks_show_locals=False,
         show_path=verbose,
         markup=False,
         log_time_format="[%X]",
