@@ -2,11 +2,11 @@
 
 import base64
 import json
+import logging
 import os
 import queue
 import secrets
 import stat
-import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -16,14 +16,18 @@ from typing import Any, Protocol, TypeVar, cast
 
 import keyring
 
+from mega_cli import CLI_NAME
 from mega_cli.config import config_dir
 
-KEYRING_SERVICE = "mega-cli"
 KEYRING_ACCOUNT = "session"
-DEFAULT_KEYRING_TIMEOUT = 3.0
+KEYRING_TIMEOUT_ENV = "MEGA_CLI_KEYRING_TIMEOUT"
+DEFAULT_KEYRING_TIMEOUT = 60.0
+DEFAULT_KEYRING_NOTICE_AFTER = 2.0
+_KEYRING_LOCK_GRACE = 0.5
 
 _T = TypeVar("_T")
 _KEYRING_LOCK = threading.Lock()
+log = logging.getLogger(__name__)
 
 
 class SessionStorage(StrEnum):
@@ -67,7 +71,11 @@ class InsecureSessionFileError(SessionError):
 
 
 class KeyringUnavailableError(SessionError):
-    """Raised when the OS keyring fails or does not answer in time."""
+    """Raised when the OS keyring fails."""
+
+
+class KeyringTimeoutError(KeyringUnavailableError):
+    """Raised when the OS keyring does not answer in time or is still busy."""
 
 
 class SessionStore:
@@ -78,8 +86,10 @@ class SessionStore:
         directory: Path | None = None,
         *,
         keyring_backend: KeyringBackend | None = None,
-        keyring_timeout: float = DEFAULT_KEYRING_TIMEOUT,
+        keyring_timeout: float | None = None,
     ) -> None:
+        if keyring_timeout is None:
+            keyring_timeout = _default_keyring_timeout()
         if keyring_timeout <= 0:
             raise ValueError("keyring timeout must be positive")
 
@@ -102,22 +112,30 @@ class SessionStore:
         )
 
         try:
-            previous = self._call_keyring(
-                self._keyring.get_password, KEYRING_SERVICE, KEYRING_ACCOUNT
-            )
+            previous = self._call_keyring(self._keyring.get_password, CLI_NAME, KEYRING_ACCOUNT)
             self._call_keyring(
                 self._keyring.set_password,
-                KEYRING_SERVICE,
+                CLI_NAME,
                 KEYRING_ACCOUNT,
                 keyring_payload,
                 on_late_success=lambda _: self._remove_keyring_value(keyring_payload),
             )
-        except KeyringUnavailableError:
-            print(
-                "Warning: OS keyring unavailable or timed out; "
-                "saving the session in a protected local file.",
-                file=sys.stderr,
+        except KeyringTimeoutError:
+            log.warning("OS keyring timed out; saving the session in a protected local file")
+            _write_json_secure(
+                self.fallback_path,
+                {
+                    "email": session.email,
+                    "sid": session.sid,
+                    "master_key": _encode_bytes(session.master_key),
+                    "user_handle": session.user_handle,
+                },
             )
+            log.warning("The fallback is active, but old secrets may remain in the OS keyring")
+            self.metadata_path.unlink(missing_ok=True)
+            return SessionStorage.FILE
+        except KeyringUnavailableError:
+            log.warning("OS keyring unavailable; saving the session in a protected local file")
             _write_json_secure(
                 self.fallback_path,
                 {
@@ -143,7 +161,7 @@ class SessionStore:
                 else:
                     self._call_keyring(
                         self._keyring.set_password,
-                        KEYRING_SERVICE,
+                        CLI_NAME,
                         KEYRING_ACCOUNT,
                         previous,
                     )
@@ -173,7 +191,7 @@ class SessionStore:
         metadata = _read_json(self.metadata_path)
         secret_payload = self._call_keyring(
             self._keyring.get_password,
-            KEYRING_SERVICE,
+            CLI_NAME,
             KEYRING_ACCOUNT,
         )
         if secret_payload is None:
@@ -207,30 +225,27 @@ class SessionStore:
 
     def _delete_keyring(self, *, ignore_errors: bool) -> None:
         try:
-            existing = self._call_keyring(
-                self._keyring.get_password, KEYRING_SERVICE, KEYRING_ACCOUNT
-            )
+            existing = self._call_keyring(self._keyring.get_password, CLI_NAME, KEYRING_ACCOUNT)
             if existing is not None:
                 self._call_keyring(
                     self._keyring.delete_password,
-                    KEYRING_SERVICE,
+                    CLI_NAME,
                     KEYRING_ACCOUNT,
                 )
         except KeyringUnavailableError:
             if not ignore_errors:
                 raise
-            print(
-                "Warning: could not remove the old OS keyring entry; "
-                "the fallback is active, but secrets may remain in the keyring.",
-                file=sys.stderr,
+            log.warning(
+                "Could not remove the old OS keyring entry; the fallback is active, "
+                "but secrets may remain in the keyring"
             )
 
     def _remove_keyring_value(self, expected: str) -> None:
         """Best-effort cleanup for a write that completed after its timeout."""
         try:
-            current = self._keyring.get_password(KEYRING_SERVICE, KEYRING_ACCOUNT)
+            current = self._keyring.get_password(CLI_NAME, KEYRING_ACCOUNT)
             if current == expected:
-                self._keyring.delete_password(KEYRING_SERVICE, KEYRING_ACCOUNT)
+                self._keyring.delete_password(CLI_NAME, KEYRING_ACCOUNT)
         except Exception:
             # This runs in a daemon thread after the caller has already fallen back
             # to a local file, so there is nowhere useful to report backend errors.
@@ -242,49 +257,83 @@ class SessionStore:
         *args: object,
         on_late_success: Callable[[_T], None] | None = None,
     ) -> _T:
-        result: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+        result: queue.Queue[_T | Exception] = queue.Queue(maxsize=1)
         state_lock = threading.Lock()
         timed_out = False
 
+        def mark_timeout(cause: queue.Empty) -> _T | Exception:
+            nonlocal timed_out
+            with state_lock:
+                try:
+                    return result.get_nowait()
+                except queue.Empty:
+                    timed_out = True
+                    raise KeyringTimeoutError(
+                        f"operation timed out after {self._keyring_timeout:g} seconds"
+                    ) from cause
+
         def run() -> None:
             try:
-                outcome: tuple[bool, object] = (True, function(*args))
+                value: _T | Exception = function(*args)
             except Exception as exc:  # keyring backends use backend-specific exceptions
-                outcome = (False, exc)
+                value = exc
 
             with state_lock:
                 if timed_out:
-                    succeeded, value = outcome
-                    if succeeded and on_late_success is not None:
-                        on_late_success(cast(_T, value))
+                    if not isinstance(value, Exception) and on_late_success is not None:
+                        on_late_success(value)
                     return
-                result.put(outcome)
+                result.put(value)
 
         def serialized_run() -> None:
-            # Late writes and their cleanup finish before a newer operation starts.
-            with _KEYRING_LOCK:
-                with state_lock:
-                    if timed_out:
-                        return
+            # The caller owns the process-wide lock. The worker releases it only
+            # after the backend call and any late cleanup have finished.
+            try:
                 run()
+            finally:
+                _KEYRING_LOCK.release()
 
-        threading.Thread(target=serialized_run, daemon=True).start()
+        # state_lock protects this call's timeout flag and queue handoff. The
+        # process-wide lock prevents a late write from overtaking a newer call.
+        lock_timeout = min(_KEYRING_LOCK_GRACE, self._keyring_timeout)
+        if not _KEYRING_LOCK.acquire(timeout=lock_timeout):
+            raise KeyringTimeoutError("a previous OS keyring operation is still pending")
         try:
-            succeeded, value = result.get(timeout=self._keyring_timeout)
-        except queue.Empty as exc:
-            with state_lock:
-                try:
-                    succeeded, value = result.get_nowait()
-                except queue.Empty:
-                    timed_out = True
-                    raise KeyringUnavailableError(
-                        f"operation timed out after {self._keyring_timeout:g} seconds"
-                    ) from exc
+            threading.Thread(target=serialized_run, daemon=True).start()
+        except BaseException:
+            _KEYRING_LOCK.release()
+            raise
 
-        if not succeeded:
-            error = cast(Exception, value)
-            raise KeyringUnavailableError("OS keyring operation failed") from error
-        return cast(_T, value)
+        notice_after = min(DEFAULT_KEYRING_NOTICE_AFTER, self._keyring_timeout)
+        try:
+            value = result.get(timeout=notice_after)
+        except queue.Empty as exc:
+            remaining = self._keyring_timeout - notice_after
+            if remaining > 0:
+                log.warning("OS keyring is still waiting; an unlock prompt may be open")
+                try:
+                    value = result.get(timeout=remaining)
+                except queue.Empty as final_exc:
+                    value = mark_timeout(final_exc)
+            else:
+                value = mark_timeout(exc)
+
+        if isinstance(value, Exception):
+            raise KeyringUnavailableError("OS keyring operation failed") from value
+        return value
+
+
+def _default_keyring_timeout() -> float:
+    raw = os.environ.get(KEYRING_TIMEOUT_ENV)
+    if raw is None:
+        return DEFAULT_KEYRING_TIMEOUT
+    try:
+        timeout = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{KEYRING_TIMEOUT_ENV} must be a number") from exc
+    if timeout <= 0:
+        raise ValueError(f"{KEYRING_TIMEOUT_ENV} must be positive")
+    return timeout
 
 
 def _write_json_secure(path: Path, payload: dict[str, object]) -> None:

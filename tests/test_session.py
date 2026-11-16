@@ -9,6 +9,7 @@ import pytest
 
 from mega_cli.session import (
     InsecureSessionFileError,
+    KeyringTimeoutError,
     KeyringUnavailableError,
     Session,
     SessionError,
@@ -79,15 +80,16 @@ def test_keyring_round_trip(tmp_path: Path, session: Session) -> None:
 def test_keyring_failure_uses_private_fallback(
     tmp_path: Path,
     session: Session,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level("WARNING", logger="mega_cli.session")
     backend = FakeKeyring()
     backend.fail_set = True
     store = SessionStore(tmp_path, keyring_backend=backend)
 
     assert store.save(session) is SessionStorage.FILE
 
-    assert "Warning: OS keyring unavailable" in capsys.readouterr().err
+    assert "OS keyring unavailable" in caplog.text
     if os.name == "posix":
         assert store.fallback_path.stat().st_mode & 0o777 == 0o600
     assert store.load().storage is SessionStorage.FILE
@@ -96,16 +98,46 @@ def test_keyring_failure_uses_private_fallback(
 def test_keyring_timeout_uses_fallback(
     tmp_path: Path,
     session: Session,
-    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level("WARNING", logger="mega_cli.session")
     backend = FakeKeyring()
-    backend.set_delay = 0.2
+    backend.set_delay = 0.05
     store = SessionStore(tmp_path, keyring_backend=backend, keyring_timeout=0.01)
 
     assert store.save(session) is SessionStorage.FILE
 
-    assert "timed out" in capsys.readouterr().err
+    assert "timed out" in caplog.text
+    assert "old secrets may remain" in caplog.text
     assert store.fallback_path.exists()
+    time.sleep(0.06)
+
+
+def test_slow_keyring_logs_unlock_hint(
+    tmp_path: Path,
+    session: Session,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    caplog.set_level("WARNING", logger="mega_cli.session")
+    monkeypatch.setattr("mega_cli.session.DEFAULT_KEYRING_NOTICE_AFTER", 0.01)
+    backend = FakeKeyring()
+    backend.set_delay = 0.03
+
+    store = SessionStore(tmp_path, keyring_backend=backend, keyring_timeout=0.1)
+
+    assert store.save(session) is SessionStorage.KEYRING
+    assert "unlock prompt may be open" in caplog.text
+
+
+def test_timeout_can_be_set_from_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MEGA_CLI_KEYRING_TIMEOUT", "12.5")
+    store = SessionStore(tmp_path, keyring_backend=FakeKeyring())
+
+    assert store._keyring_timeout == 12.5
 
 
 def test_late_keyring_write_is_removed_after_timeout(
@@ -312,3 +344,50 @@ def test_late_write_cannot_overwrite_new_session(tmp_path: Path, session: Sessio
     newer = replace(session, sid="new-session")
     assert store.save(newer) is SessionStorage.KEYRING
     assert store.load() == replace(newer, storage=SessionStorage.KEYRING)
+
+
+def test_pending_keyring_call_fails_fast_without_starting_more_calls(
+    tmp_path: Path,
+    session: Session,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    class BlockingGetKeyring(FakeKeyring):
+        def __init__(self) -> None:
+            super().__init__()
+            self.block_get = False
+            self.get_calls = 0
+
+        def get_password(self, service: str, username: str) -> str | None:
+            self.get_calls += 1
+            if self.block_get:
+                started.set()
+                release.wait(timeout=2)
+                finished.set()
+            return super().get_password(service, username)
+
+    backend = BlockingGetKeyring()
+    store = SessionStore(tmp_path, keyring_backend=backend, keyring_timeout=0.05)
+    store.save(session)
+    backend.block_get = True
+
+    try:
+        with pytest.raises(KeyringTimeoutError):
+            store.load()
+        assert started.is_set()
+        calls_after_timeout = backend.get_calls
+
+        with pytest.raises(KeyringTimeoutError, match="previous OS keyring operation"):
+            store.load()
+        with pytest.raises(KeyringTimeoutError, match="previous OS keyring operation"):
+            store.load()
+
+        assert backend.get_calls == calls_after_timeout
+    finally:
+        backend.block_get = False
+        release.set()
+
+    assert finished.wait(timeout=2)
+    assert store.load() == replace(session, storage=SessionStorage.KEYRING)
