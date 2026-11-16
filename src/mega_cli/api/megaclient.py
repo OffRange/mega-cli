@@ -33,6 +33,15 @@ def _is_error_code(v: object) -> TypeGuard[int]:
     return isinstance(v, int) and v < 0
 
 
+def _shape(v: object) -> str:
+    """Describe a response without its values, which may hold keys or session IDs."""
+    if isinstance(v, list):
+        return f"list of {len(v)}"
+    if isinstance(v, dict):
+        return f"object with keys {sorted(v)}"
+    return type(v).__name__
+
+
 class MegaClient:
     def __init__(
         self,
@@ -117,7 +126,7 @@ class MegaClient:
 
         names = [cmd.name for cmd in commands]
         raise MegaProtocolError(
-            f"Expected a list of {len(commands)} results for {names}, got {data!r:.200}"
+            f"Expected a list of {len(commands)} results for {names}, got {_shape(data)}"
         )
 
     def _params(self) -> dict[str, str]:
@@ -200,4 +209,8 @@ class MegaClient:
         try:
             return response.json()
         except ValueError:
-            raise MegaProtocolError(f"Response is not JSON: {response.text[:200]!r}") from None
+            content_type = response.headers.get("content-type", "unknown")
+            raise MegaProtocolError(
+                f"Response is not JSON (Content-Type: {content_type}, "
+                f"{len(response.content)} bytes)"
+            ) from None

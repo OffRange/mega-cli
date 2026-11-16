@@ -52,7 +52,7 @@ class BaseCommand[Response = Any]:
 
         if not isinstance(raw, dict):
             raise MegaProtocolError(
-                f"Expected an object for {cls.name!r} ({rt.__name__}), got {raw!r:.200}"
+                f"Expected an object for {cls.name!r} ({rt.__name__}), got {type(raw).__name__}"
             )
 
         fields = dataclasses.fields(rt)
@@ -70,7 +70,7 @@ class BaseCommand[Response = Any]:
         if missing:
             raise MegaProtocolError(
                 f"Response for {cls.name!r} ({rt.__name__}) is missing required fields "
-                f"{missing}, got {raw!r:.200}"
+                f"{missing}, got keys {sorted(raw)}"
             )
 
         kwargs = {name: raw[alias] for name, alias in aliases.items() if alias in raw}
