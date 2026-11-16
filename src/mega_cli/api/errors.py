@@ -180,8 +180,9 @@ def report_unexpected(exc: Exception, *, verbose: bool, console: Console) -> Exi
     if verbose:
         _print_stacktrace(exc, console)
 
+    hint = "" if verbose else " Re-run with --verbose to see further information."
     _print_error_line(
-        f"Unexpected error ({type(exc).__name__}). Re-run with --verbose and report it.",
+        f"Unexpected error ({type(exc).__name__}).{hint}",
         console,
     )
     return ExitCode.GENERAL
