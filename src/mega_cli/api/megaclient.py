@@ -15,6 +15,7 @@ from mega_cli.api.errors import (
     MegaClientError,
     MegaProtocolError,
     MegaTransportError,
+    command_labels,
 )
 from mega_cli.logging import install_sid_redaction
 
@@ -115,7 +116,14 @@ class MegaClient:
         if not commands:
             return []
 
-        data = self._post(commands)
+        try:
+            data = self._post(commands)
+        except (MegaTransportError, MegaProtocolError) as e:
+            # These fail the whole request, not one command: record what was in flight for
+            # the --verbose traceback. MegaApiError already carries its commands.
+            e.add_note(f"While sending: {command_labels([type(cmd) for cmd in commands])}")
+            raise
+
         if isinstance(data, list) and len(data) == len(commands):
             return [
                 MegaApiError(item, [type(cmd)])

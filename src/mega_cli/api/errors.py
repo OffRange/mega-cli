@@ -57,6 +57,11 @@ _DESCRIPTIONS: dict[MegaErrorCode, str] = {
 _RETRYABLE = frozenset({MegaErrorCode.EAGAIN, MegaErrorCode.ERATELIMIT})
 
 
+def command_labels(commands: Sequence[type[BaseCommand]]) -> str:
+    """E.g. ``Login ('us'), Ping ('ping')``"""
+    return ", ".join(f"{cmd.__name__} ('{cmd.name}')" for cmd in commands)
+
+
 class MegaClientError(Exception):
     """Base exception for everything this package raises."""
 
@@ -89,8 +94,7 @@ class MegaApiError(MegaClientError):
         msg = self.error.description if self.error else "Unknown error"
         where = ""
         if self.commands:
-            labels = ", ".join(f"{cmd.__name__} ('{cmd.name}')" for cmd in self.commands)
-            where = f" in command {labels}"
+            where = f" in command {command_labels(self.commands)}"
         return f"{name} ({self.code}){where}: {msg}"
 
     @property
