@@ -7,6 +7,7 @@ import pytest
 import typer
 from typer.testing import CliRunner, Result
 
+from mega_cli import hashcash
 from mega_cli.api import BaseCommand, Field, MegaClient
 from mega_cli.api.errors import (
     API_ERRORS,
@@ -350,7 +351,7 @@ def test_unexpected_error_redacts_secrets_in_message(verbose: bool) -> None:
             "Error: Refusing to use the saved session: refusing to load "
             "/cfg/session.secrets.json: expected permissions 0600, found 0644. "
             "Make the file private (chmod 600) or delete it. "
-            "Run `mega-cli login` to sign in again.",
+            "Run `mega-cli login` to sign in.",
         ),
         (
             KeyringTimeoutError("operation timed out after 60 seconds"),
@@ -368,7 +369,7 @@ def test_unexpected_error_redacts_secrets_in_message(verbose: bool) -> None:
             SessionError("invalid JSON in /cfg/session.json"),
             ExitCode.GENERAL,
             "Error: The saved session could not be used: invalid JSON in /cfg/session.json. "
-            "Run `mega-cli login` to sign in again.",
+            "Run `mega-cli login` to sign in.",
         ),
     ],
     ids=lambda v: type(v).__name__ if isinstance(v, Exception) else None,

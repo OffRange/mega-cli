@@ -126,7 +126,7 @@ class UserError:
     exit_code: ExitCode
 
 
-_LOGIN_HINT = f"Run `{CLI_NAME} login` to sign in again."
+_LOGIN_HINT = f"Run `{CLI_NAME} login` to sign in."
 API_ERRORS: dict[MegaErrorCode | None, UserError] = {
     MegaErrorCode.EINTERNAL: UserError(
         "MEGA reported an internal error. Try later again.", ExitCode.GENERAL
