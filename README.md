@@ -43,13 +43,13 @@ pip install -e . --group dev
 
 Für Tests, Formatierung und Typprüfung gibt es folgende `make`-Befehle:
 
-| Befehl        | Beschreibung                                                        |
-|---------------|---------------------------------------------------------------------|
-| `make test`   | Führt alle Tests aus                                                |
-| `make lint`   | Prüft Code-Stil und Typisierung                                     |
-| `make format` | Prüft die Codeformatierung (ohne Änderungen vorzunehmen)            |
-| `make check`  | Führt alle Prüfungen aus (`test`, `lint`, `format`)                 |
-| `make fix`    | Formatiert den Code und behebt automatisch behebbare Lint-Fehler    |
+| Befehl        | Beschreibung                                                     |
+|---------------|------------------------------------------------------------------|
+| `make test`   | Führt alle Tests aus                                             |
+| `make lint`   | Prüft Code-Stil und Typisierung                                  |
+| `make format` | Prüft die Codeformatierung (ohne Änderungen vorzunehmen)         |
+| `make check`  | Führt alle Prüfungen aus (`test`, `lint`, `format`)              |
+| `make fix`    | Formatiert den Code und behebt automatisch behebbare Lint-Fehler |
 
 ### Vor jedem Push / Pull Request
 
@@ -79,6 +79,22 @@ uv run mega-cli          # mit uv
 mega-cli                 # in der aktivierten venv
 python -m mega_cli       # alternativ
 ```
+
+### Exit-Codes
+
+Bei Fehlern gibt `mega-cli` eine einzeilige Meldung auf stderr aus und beendet sich mit einem der folgenden
+Exit-Codes. Skripte könnten sich potentiell auf diese Werte verlassen; eine Änderung gilt als Breaking Change.
+Mit `--verbose` werden zusätzlich der Traceback und der betroffene API-Befehl angezeigt.
+
+| Code | Bedeutung          | Typische Ursachen                                                                                                                                                                 |
+|------|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`  | Erfolg             |                                                                                                                                                                                   |
+| `1`  | Allgemeiner Fehler | Interner MEGA-Fehler (`EINTERNAL`, `EFAILED`), abgelehnte Anfrage (`EARGS`), unerwartete Antwort, Probleme mit der gespeicherten Session oder dem OS-Keyring, unbekannte Fehler   |
+| `2`  | Usage-Fehler       | Ungültige Argumente oder Optionen                                                                                                                                                 |
+| `3`  | Authentifizierung  | Nicht eingeloggt, Session abgelaufen (`ESID`), falsche E-Mail oder falsches Passwort, Zugriff verweigert (`EACCESS`), Zwei-Faktor-Authentifizierung erforderlich (`EMFAREQUIRED`) |
+| `4`  | Nicht gefunden     | Ressource existiert nicht (`ENOENT`)                                                                                                                                              |
+| `5`  | Quota              | Speicher-Quota überschritten (`EOVERQUOTA`)                                                                                                                                       |
+| `6`  | Netzwerk           | Verbindungsfehler, HTTP-Fehlerstatus, MEGA vorübergehend nicht erreichbar (`EAGAIN`), zu viele Anfragen (`ERATELIMIT`), abgelehnte Hashcash-Lösung                                |
 
 ### Geplante Befehle & Struktur
 

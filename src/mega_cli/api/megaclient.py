@@ -13,8 +13,10 @@ from mega_cli.api import BaseCommand
 from mega_cli.api.errors import (
     MegaApiError,
     MegaClientError,
+    MegaHashcashError,
     MegaProtocolError,
     MegaTransportError,
+    command_labels,
 )
 from mega_cli.logging import install_sid_redaction
 
@@ -31,6 +33,15 @@ type BatchResult = list[MegaApiError | httpx2.Response]
 
 def _is_error_code(v: object) -> TypeGuard[int]:
     return isinstance(v, int) and v < 0
+
+
+def _shape(v: object) -> str:
+    """Describe a response without its values, which may hold keys or session IDs."""
+    if isinstance(v, list):
+        return f"list of {len(v)}"
+    if isinstance(v, dict):
+        return f"object with keys {sorted(v)}"
+    return type(v).__name__
 
 
 class MegaClient:
@@ -106,7 +117,14 @@ class MegaClient:
         if not commands:
             return []
 
-        data = self._post(commands)
+        try:
+            data = self._post(commands)
+        except (MegaTransportError, MegaProtocolError) as e:
+            # These fail the whole request, not one command: record what was in flight for
+            # the --verbose traceback. MegaApiError already carries its commands.
+            e.add_note(f"While sending: {command_labels([type(cmd) for cmd in commands])}")
+            raise
+
         if isinstance(data, list) and len(data) == len(commands):
             return [
                 MegaApiError(item, [type(cmd)])
@@ -117,7 +135,7 @@ class MegaClient:
 
         names = [cmd.name for cmd in commands]
         raise MegaProtocolError(
-            f"Expected a list of {len(commands)} results for {names}, got {data!r:.200}"
+            f"Expected a list of {len(commands)} results for {names}, got {_shape(data)}"
         )
 
     def _params(self) -> dict[str, str]:
@@ -193,11 +211,17 @@ class MegaClient:
             log.debug("Solving hashcash challenge")
             headers["x-hashcash"] = hashcash.solve_hashcash_challenge(challenge)
 
-        raise MegaTransportError("Server kept rejecting hashcash solution")
+        raise MegaHashcashError(
+            f"MEGA rejected the hashcash solution {MAX_HASHCASH_ROUNDS} times in a row"
+        )
 
     @staticmethod
     def _decode(response: httpx2.Response) -> Any:
         try:
             return response.json()
         except ValueError:
-            raise MegaProtocolError(f"Response is not JSON: {response.text[:200]!r}") from None
+            content_type = response.headers.get("content-type", "unknown")
+            raise MegaProtocolError(
+                f"Response is not JSON (Content-Type: {content_type}, "
+                f"{len(response.content)} bytes)"
+            ) from None
