@@ -13,6 +13,14 @@ from typer.core import TyperGroup
 from mega_cli import CLI_NAME
 from mega_cli.api import BaseCommand
 from mega_cli.logging import redact
+from mega_cli.session import (
+    KEYRING_TIMEOUT_ENV,
+    InsecureSessionFileError,
+    KeyringTimeoutError,
+    KeyringUnavailableError,
+    SessionError,
+    SessionNotFoundError,
+)
 
 
 class MegaErrorCode(IntEnum):
@@ -151,7 +159,40 @@ COMMAND_OVERRIDES: dict[tuple[str, MegaErrorCode | None], UserError] = {
 VERBOSE_KEY = "mega_cli.verbose"
 
 
-def _describe(e: MegaClientError) -> UserError:
+def _sentence(e: Exception) -> str:
+    """The exception message as the start of a sentence."""
+    msg = str(e)
+    return msg[:1].upper() + msg[1:]
+
+
+def _describe_session_error(e: SessionError) -> UserError:
+    if isinstance(e, SessionNotFoundError):
+        return UserError(f"You are not logged in. {_LOGIN_HINT}", ExitCode.AUTH)
+
+    if isinstance(e, InsecureSessionFileError):
+        return UserError(
+            f"Refusing to use the saved session: {e}. "
+            f"Make the file private (chmod 600) or delete it. {_LOGIN_HINT}",
+            ExitCode.GENERAL,
+        )
+
+    if isinstance(e, KeyringTimeoutError):
+        return UserError(
+            f"The OS keyring did not respond ({e}). Unlock it if a prompt is open and try again, "
+            f"or set {KEYRING_TIMEOUT_ENV} to wait longer.",
+            ExitCode.GENERAL,
+        )
+
+    if isinstance(e, KeyringUnavailableError):
+        return UserError(
+            f"{_sentence(e)}. Make sure the OS keyring is running and unlocked.",
+            ExitCode.GENERAL,
+        )
+
+    return UserError(f"The saved session could not be used: {e}. {_LOGIN_HINT}", ExitCode.GENERAL)
+
+
+def _describe_mega_client_error(e: MegaClientError) -> UserError:
     if isinstance(e, MegaApiError):
         for cmd in e.commands:
             if override := COMMAND_OVERRIDES.get((cmd.name, e.error)):
@@ -172,7 +213,15 @@ def _describe(e: MegaClientError) -> UserError:
     return UserError("An unexpected error occurred.", ExitCode.GENERAL)
 
 
-def report(e: MegaClientError, *, verbose: bool, console: Console) -> ExitCode:
+def _describe(e: MegaClientError | SessionError) -> UserError:
+    if isinstance(e, SessionError):
+        return _describe_session_error(e)
+
+    elif isinstance(e, MegaClientError):
+        return _describe_mega_client_error(e)
+
+
+def report(e: MegaClientError | SessionError, *, verbose: bool, console: Console) -> ExitCode:
     user_error = _describe(e)
     if verbose:
         _print_stacktrace(e, console)
@@ -208,7 +257,7 @@ class MegaErrorHandlerGroup(TyperGroup):
             return super().invoke(ctx)
         except (typer.TyperException, typer.Exit, typer.Abort):
             raise  # Click's own control flow and usage errors: leave untouched
-        except MegaClientError as e:
+        except (MegaClientError, SessionError) as e:
             verbose = bool(ctx.meta.get(VERBOSE_KEY, False))
             raise typer.Exit(report(e, verbose=verbose, console=Console(stderr=True))) from None
         except Exception as e:

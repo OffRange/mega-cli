@@ -166,9 +166,7 @@ class SessionStore:
                         previous,
                     )
             except KeyringUnavailableError:
-                raise SessionError(
-                    "metadata write failed and keyring rollback failed; log in again"
-                ) from None
+                raise SessionError("metadata write failed and keyring rollback failed") from None
             raise
         self.fallback_path.unlink(missing_ok=True)
         return SessionStorage.KEYRING

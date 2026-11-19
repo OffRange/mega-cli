@@ -19,6 +19,13 @@ from mega_cli.api.errors import (
     MegaTransportError,
 )
 from mega_cli.cli.app import root
+from mega_cli.session import (
+    InsecureSessionFileError,
+    KeyringTimeoutError,
+    KeyringUnavailableError,
+    SessionError,
+    SessionNotFoundError,
+)
 
 BASE_URL = "https://test.example.mega"
 SECRET_SID = "SeCrEtSiD-do-not-leak-0123456789abcdef"
@@ -324,3 +331,79 @@ def test_unexpected_error_redacts_secrets_in_message(verbose: bool) -> None:
 
     assert result.exit_code == ExitCode.GENERAL
     assert_no_secrets(result)
+
+
+# --- session storage errors -------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("exc", "exit_code", "expected"),
+    [
+        (
+            SessionNotFoundError("no saved session found"),
+            ExitCode.AUTH,
+            "Error: You are not logged in. Run `mega-cli login` to sign in.",
+        ),
+        (
+            InsecureSessionFileError(
+                "refusing to load /cfg/session.secrets.json: expected permissions 0600, found 0644"
+            ),
+            ExitCode.GENERAL,
+            "Error: Refusing to use the saved session: refusing to load "
+            "/cfg/session.secrets.json: expected permissions 0600, found 0644. "
+            "Make the file private (chmod 600) or delete it. "
+            "Run `mega-cli login` to sign in again.",
+        ),
+        (
+            KeyringTimeoutError("operation timed out after 60 seconds"),
+            ExitCode.GENERAL,
+            "Error: The OS keyring did not respond (operation timed out after 60 seconds). "
+            "Unlock it if a prompt is open and try again, "
+            "or set MEGA_CLI_KEYRING_TIMEOUT to wait longer.",
+        ),
+        (
+            KeyringUnavailableError("OS keyring operation failed"),
+            ExitCode.GENERAL,
+            "Error: OS keyring operation failed. Make sure the OS keyring is running and unlocked.",
+        ),
+        (
+            SessionError("invalid JSON in /cfg/session.json"),
+            ExitCode.GENERAL,
+            "Error: The saved session could not be used: invalid JSON in /cfg/session.json. "
+            "Run `mega-cli login` to sign in again.",
+        ),
+    ],
+    ids=lambda v: type(v).__name__ if isinstance(v, Exception) else None,
+)
+def test_session_error_maps_to_message_and_exit_code(
+    exc: SessionError, exit_code: ExitCode, expected: str
+) -> None:
+    result = run(raising(exc))
+
+    assert result.exit_code == exit_code
+    assert " ".join(result.output.split()) == expected
+    assert "Traceback" not in result.output
+
+
+def test_keyring_delete_failure_says_local_files_were_removed() -> None:
+    exc = KeyringUnavailableError(
+        "local session files were removed, but the OS keyring entry could not be removed: "
+        "OS keyring operation failed"
+    )
+    result = run(raising(exc))
+
+    assert result.exit_code == ExitCode.GENERAL
+    assert squashed(result).startswith("Error:Localsessionfileswereremoved")
+
+
+def test_session_error_verbose_shows_cause() -> None:
+    def action() -> None:
+        try:
+            raise RuntimeError("dbus: org.freedesktop.secrets not provided")
+        except RuntimeError as cause:
+            raise KeyringUnavailableError("OS keyring operation failed") from cause
+
+    result = run(action, verbose=True)
+
+    assert result.exit_code == ExitCode.GENERAL
+    assert "Traceback" in result.output
+    assert "org.freedesktop.secrets" in result.output
+    assert len(error_lines(result)) == 1
