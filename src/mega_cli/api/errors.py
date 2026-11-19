@@ -78,6 +78,10 @@ class MegaTransportError(MegaClientError):
     """Exception for the client's transport layer"""
 
 
+class MegaHashcashError(MegaTransportError):
+    """MEGA kept rejecting the proof-of-work (hashcash) solution for a request"""
+
+
 class MegaProtocolError(MegaClientError):
     """Exception for the client's protocol layer"""
 
@@ -203,6 +207,13 @@ def _describe_mega_client_error(e: MegaClientError) -> UserError:
             user_error.message.replace("<code>", str(e.code)), user_error.exit_code
         )
         return user_error
+
+    elif isinstance(e, MegaHashcashError):
+        return UserError(
+            "MEGA did not accept the anti-abuse check (hashcash) for this request. "
+            "Try again later.",
+            ExitCode.NETWORK,
+        )
 
     elif isinstance(e, MegaTransportError):
         return UserError(f"{e}. Check your internet connection.", ExitCode.NETWORK)

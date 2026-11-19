@@ -277,6 +277,23 @@ def test_permanent_server_error_has_network_exit_code() -> None:
     assert error_lines(result) == ["Error: Server error: HTTP 503. Check your internet connection."]
 
 
+def test_rejected_hashcash_has_its_own_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hashcash, "solve_hashcash_challenge", lambda _challenge: "solved")
+    challenge = httpx2.Response(402, headers={"x-hashcash": "1:abc:def"})
+
+    def action() -> None:
+        with make_client(replying(challenge), max_retries=0) as client:
+            client.request(Ping())
+
+    result = run(action)
+    assert result.exit_code == ExitCode.NETWORK
+    assert error_lines(result) == [
+        "Error: MEGA did not accept the anti-abuse check (hashcash) for this request. "
+        "Try again later."
+    ]
+    assert "internet connection" not in result.output
+
+
 # --- secrets never in the output, even with --verbose -----------------------------------------
 @pytest.mark.parametrize("verbose", [False, True])
 def test_login_failure_never_shows_secrets(verbose: bool) -> None:

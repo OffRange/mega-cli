@@ -13,6 +13,7 @@ from mega_cli.api import BaseCommand
 from mega_cli.api.errors import (
     MegaApiError,
     MegaClientError,
+    MegaHashcashError,
     MegaProtocolError,
     MegaTransportError,
     command_labels,
@@ -210,7 +211,9 @@ class MegaClient:
             log.debug("Solving hashcash challenge")
             headers["x-hashcash"] = hashcash.solve_hashcash_challenge(challenge)
 
-        raise MegaTransportError("Server kept rejecting hashcash solution")
+        raise MegaHashcashError(
+            f"MEGA rejected the hashcash solution {MAX_HASHCASH_ROUNDS} times in a row"
+        )
 
     @staticmethod
     def _decode(response: httpx2.Response) -> Any:
