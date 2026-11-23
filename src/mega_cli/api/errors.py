@@ -198,9 +198,12 @@ def _describe_session_error(e: SessionError) -> UserError:
 
 def _describe_mega_client_error(e: MegaClientError) -> UserError:
     if isinstance(e, MegaApiError):
-        for cmd in e.commands:
-            if override := COMMAND_OVERRIDES.get((cmd.name, e.error)):
-                return override
+        # A batch-level error carries every command of the batch, so it can't be pinned on one
+        # of them: apply a per-command override only when the error belongs to a single command.
+        if len(e.commands) == 1 and (
+            override := COMMAND_OVERRIDES.get((e.commands[0].name, e.error))
+        ):
+            return override
 
         user_error = API_ERRORS[e.error]
         user_error = UserError(

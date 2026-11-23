@@ -165,6 +165,14 @@ def test_enoent_on_login_means_wrong_credentials() -> None:
     assert error_lines(result) == ["Error: Wrong email or password."]
 
 
+def test_batch_level_enoent_with_login_is_not_wrong_credentials() -> None:
+    # A whole-body -9 covers every command of the batch; it doesn't show the login failed
+    result = run(raising(MegaApiError(MegaErrorCode.ENOENT, [Login, Ping])))
+
+    assert result.exit_code == ExitCode.NOT_FOUND
+    assert error_lines(result) == ["Error: Not found."]
+
+
 def test_api_error_end_to_end_through_client() -> None:
     def action() -> None:
         with make_client(replying(MegaErrorCode.ESID)) as client:
