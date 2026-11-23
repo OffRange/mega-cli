@@ -8,7 +8,12 @@ import httpx2
 import pytest
 
 from mega_cli.api import BaseCommand, Field, MegaClient
-from mega_cli.api.errors import MegaApiError, MegaErrorCode, MegaTransportError
+from mega_cli.api.errors import (
+    MegaApiError,
+    MegaErrorCode,
+    MegaProtocolError,
+    MegaTransportError,
+)
 
 BASE_URL = "https://test.example.mega"
 SECRET_SID = "SeCrEtSiD-do-not-log-0123456789abcdef"
@@ -240,3 +245,78 @@ def test_sid_never_logged(
     assert any(r.name == "httpx2" for r in caplog.records)
     assert "sid=<redacted>" in caplog.text
     assert SECRET_SID not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("reply", "shape"),
+    [
+        ([{"csid": SECRET_SID}, {"k": SECRET_UH}], "got list of 2"),
+        ({"csid": SECRET_SID, "k": SECRET_UH}, "got object with keys ['csid', 'k']"),
+        (SECRET_SID, "got str"),
+    ],
+)
+def test_unexpected_batch_reply_error_hides_values(
+    make_client: Callable[..., Any], reply: Any, shape: str
+) -> None:
+    client, _ = make_client(reply)
+    with pytest.raises(MegaProtocolError) as exc:
+        client.request(Ping())
+
+    message = str(exc.value)
+    assert shape in message
+    assert SECRET_SID not in message
+    assert SECRET_UH not in message
+
+
+def test_non_json_error_hides_body(make_client: Callable[..., Any]) -> None:
+    body = f"<html>csid={SECRET_SID}</html>"
+    client, _ = make_client(httpx2.Response(200, text=body, headers={"content-type": "text/html"}))
+    with pytest.raises(MegaProtocolError) as exc:
+        client.request(Ping())
+
+    message = str(exc.value)
+    assert f"Content-Type: text/html, {len(body)} bytes" in message
+    assert SECRET_SID not in message
+
+
+# --- request-level errors note the commands in flight -----------------------------------------
+@pytest.mark.parametrize(
+    "reply",
+    [
+        httpx2.Response(503),  # transport
+        httpx2.Response(200, text="<html>"),  # protocol: not JSON
+    ],
+    ids=["transport", "not-json"],
+)
+def test_request_errors_note_commands_in_flight(
+    make_client: Callable[..., Any], reply: Any
+) -> None:
+    client, _ = make_client(reply, max_retries=0)
+    with pytest.raises((MegaTransportError, MegaProtocolError)) as exc:
+        client.request_batch([Ping(), Ping()])
+
+    assert exc.value.__notes__ == ["While sending: Ping ('ping'), Ping ('ping')"]
+
+
+def test_batch_shape_error_names_its_commands(make_client: Callable[..., Any]) -> None:
+    client, _ = make_client({"not": "a list"})
+    with pytest.raises(MegaProtocolError, match=r"\['ping', 'ping'\]"):
+        client.request_batch([Ping(), Ping()])
+
+
+@dataclass
+class SessionResponse:
+    session_id: str = Field(api_alias="csid")
+
+
+class Session(BaseCommand[SessionResponse], name="session"):
+    pass
+
+
+def test_parse_error_knows_its_command(make_client: Callable[..., Any]) -> None:
+    client, _ = make_client([0, {"unexpected": 1}])
+    with pytest.raises(MegaProtocolError, match=r"for 'session'") as exc:
+        client.request_batch([Ping(), Session()])
+
+    # Only the command whose response could not be parsed, not the whole batch
+    assert "'ping'" not in str(exc.value)
