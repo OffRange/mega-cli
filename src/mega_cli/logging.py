@@ -1,8 +1,9 @@
 import logging
 import re
 
-# API field names whose values are secret: session IDs, user handle, password and key material
-_SENSITIVE = ("sid", "csid", "tsid", "uh", "k", "privk", "password")
+# Field names whose values are secret: session IDs, user handle, password and key material.
+# Mostly API fields; "master_key" is the key's name in the saved session payload.
+_SENSITIVE = ("sid", "csid", "tsid", "uh", "k", "privk", "password", "master_key")
 _ALTS = "|".join(_SENSITIVE)
 
 # ?sid=... / &uh=... in URLs

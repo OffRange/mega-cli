@@ -359,6 +359,19 @@ def test_unexpected_error_redacts_secrets_in_message(verbose: bool) -> None:
     assert_no_secrets(result)
 
 
+@pytest.mark.parametrize("verbose", [False, True])
+def test_unexpected_error_redacts_session_payload(verbose: bool) -> None:
+    # The saved session payload names the key "master_key", not the API's "k"
+    def action() -> None:
+        payload = {"email": "dev@example.com", "sid": SECRET_SID, "master_key": SECRET_KEY}
+        raise RuntimeError(f"bad session payload {payload}")
+
+    result = run(action, verbose=verbose)
+
+    assert result.exit_code == ExitCode.GENERAL
+    assert_no_secrets(result)
+
+
 # --- session storage errors -------------------------------------------------------------------
 @pytest.mark.parametrize(
     ("exc", "exit_code", "expected"),
