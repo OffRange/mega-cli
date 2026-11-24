@@ -6,7 +6,7 @@ never use it for new encryption designs.
 
 from dataclasses import dataclass, field
 
-from mega_cli.crypto import base64url_decode, base64url_encode, unwrap_key
+from mega_cli.crypto.encoding import base64url_decode, base64url_encode, unwrap_key
 
 SID_LENGTH = 43
 

@@ -17,10 +17,22 @@ import os
 from dataclasses import dataclass
 
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from mega_cli.api import BaseCommand, Field, MegaClient
+from mega_cli.crypto.encoding import (
+    base64url_decode,
+    base64url_encode,
+    unwrap_key,
+    wrap_key,
+)
+from mega_cli.crypto.rsa import (
+    decrypt_private_key,
+    decrypt_session_id,
+    parse_mpis,
+)
 
 SID_LENGTH = 43
 
@@ -154,5 +166,87 @@ def main() -> None:
         print(json.dumps(resp, indent=2))
 
 
+def crypto_rsa_poc() -> None:
+    # 1. Encoding testen
+    original = b"MEGA Encoding Test"
+    encoded = base64url_encode(original)
+    decoded = base64url_decode(encoded)
+
+    assert decoded == original
+    print("[1] Base64url Round-Trip")
+
+    # 2. AES-Key-Wrapping testen
+    master_key = bytes(range(16))
+    key = bytes(range(16, 32))
+
+    wrapped = wrap_key(key, master_key)
+    unwrapped = unwrap_key(wrapped, master_key)
+
+    assert unwrapped == key
+    print("[2] AES-128 Key-Wrapping")
+
+    # 3. RSA-Key erzeugen
+    test_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+    )
+
+    numbers = test_key.private_numbers()
+
+    # MEGA MPI-Format erzeugen
+    def mpi_encode(value: int) -> bytes:
+        bits = value.bit_length()
+        data = value.to_bytes((bits + 7) // 8, "big")
+        return bits.to_bytes(2, "big") + data
+
+    # MPI-Parsing überprüfen
+    values = (numbers.p, numbers.q, numbers.d, 1)
+    encoded_mpis = b"".join(mpi_encode(v) for v in values)
+
+    assert parse_mpis(encoded_mpis, 4) == values
+    print("[3] RSA MPI-Parsing")
+
+    # 4. Privaten RSA-Key mit AES verschlüsseln
+    padding = (-len(encoded_mpis)) % 16
+    encrypted_privk = wrap_key(
+        encoded_mpis + bytes(padding),
+        master_key,
+    )
+
+    private_key = decrypt_private_key(
+        base64url_encode(encrypted_privk),
+        master_key,
+    )
+    print("[4] RSA Private-Key entschlüsselt")
+
+    # 5. Synthetische Session-ID mit führenden Nullbytes
+    sid = b"\x00\x00" + bytes(range(41))
+
+    # MEGA legt die SID im linken Teil des RSA-Klartexts ab
+    width = (numbers.p.bit_length() + 7) // 8 + (numbers.q.bit_length() + 7) // 8 - 2
+
+    plaintext = sid.ljust(width, b"\x00")
+    plaintext_int = int.from_bytes(plaintext, "big")
+
+    # 6. Raw-RSA-Verschlüsselung
+    ciphertext_int = pow(
+        plaintext_int,
+        numbers.public_numbers.e,
+        numbers.public_numbers.n,
+    )
+
+    csid = base64url_encode(mpi_encode(ciphertext_int))
+
+    decrypted_sid = decrypt_session_id(
+        csid,
+        private_key,
+    )
+
+    assert base64url_decode(decrypted_sid) == sid
+    print("[5] Führende Nullbytes erhalten")
+    print("[6] RSA Session-ID entschlüsselt")
+
+
 if __name__ == "__main__":
+    crypto_rsa_poc()
     main()
