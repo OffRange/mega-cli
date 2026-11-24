@@ -100,8 +100,7 @@ def decrypt_session_id(encrypted_csid: str, private_key: MegaPrivateKey) -> str:
         plaintext_int = pow(ciphertext, private_key.d, n)
         # The -2 is MEGA's legacy RSA decoding width convention.
         width = max(
-            (private_key.p.bit_length() + 7) // 8
-            + (private_key.q.bit_length() + 7) // 8 - 2,
+            (private_key.p.bit_length() + 7) // 8 + (private_key.q.bit_length() + 7) // 8 - 2,
             (plaintext_int.bit_length() + 7) // 8,
         )
         if width < SID_LENGTH:

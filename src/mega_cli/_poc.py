@@ -16,14 +16,6 @@ import math
 import os
 from dataclasses import dataclass
 
-from mega_cli.crypto.encoding import (
-    base64url_encode,
-    base64url_decode,
-    wrap_key,
-    unwrap_key,
-    derive_v2_login_keys,
-)
-
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
