@@ -1,7 +1,6 @@
 """MEGA login RSA primitives: AES-wrapped MPI private keys and raw RSA SID.
 
-Raw RSA is required for compatibility with MEGA's existing login protocol;
-never use it for new encryption designs.
+Raw RSA is required for compatibility with MEGA's existing login protocol.
 """
 
 from dataclasses import dataclass, field
@@ -85,13 +84,15 @@ def decrypt_private_key(encrypted_privk: str, master_key: bytes) -> MegaPrivateK
     return MegaPrivateKey(p=p, q=q, d=d)
 
 
+def _byte_length(n: int) -> int:
+    return (n.bit_length() + 7) // 8
+
+
 def decrypt_session_id(encrypted_csid: str, private_key: MegaPrivateKey) -> str:
     """Decrypt MEGA's single-MPI raw-RSA `csid` to 43-byte base64url `sid`.
 
     Protocol width is reconstructed before slicing, preserving leading zeroes.
     """
-    if not isinstance(private_key, MegaPrivateKey):
-        raise TypeError("private_key must be MegaPrivateKey")
     try:
         (ciphertext,) = parse_mpis(base64url_decode(encrypted_csid), 1)
         n = private_key.p * private_key.q
@@ -100,8 +101,8 @@ def decrypt_session_id(encrypted_csid: str, private_key: MegaPrivateKey) -> str:
         plaintext_int = pow(ciphertext, private_key.d, n)
         # The -2 is MEGA's legacy RSA decoding width convention.
         width = max(
-            (private_key.p.bit_length() + 7) // 8 + (private_key.q.bit_length() + 7) // 8 - 2,
-            (plaintext_int.bit_length() + 7) // 8,
+            _byte_length(private_key.p) + _byte_length(private_key.q) - 2,
+            _byte_length(plaintext_int),
         )
         if width < SID_LENGTH:
             raise SessionDecryptionError("RSA plaintext is too short for a session ID")

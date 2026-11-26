@@ -18,8 +18,6 @@ PBKDF2_ITERATIONS = 100_000
 
 def base64url_encode(data: bytes) -> str:
     """Encode bytes as MEGA base64url (URL alphabet, no trailing '=')."""
-    if not isinstance(data, bytes):
-        raise TypeError("data must be bytes")
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
 
@@ -82,10 +80,13 @@ class V2LoginKeys:
 
 def derive_v2_login_keys(password: str, salt: bytes) -> V2LoginKeys:
     """Derive MEGA v2 login credentials from the password and us0 salt."""
+
     if not isinstance(password, str):
         raise TypeError("password must be str")
+
     if not isinstance(salt, bytes):
         raise TypeError("salt must be bytes")
+
     if not salt:
         raise ValueError("salt must not be empty")
 

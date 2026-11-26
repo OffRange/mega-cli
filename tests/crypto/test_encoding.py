@@ -1,12 +1,32 @@
 import pytest
 
-from mega_cli.crypto import (
+from mega_cli.crypto.encoding import (
     base64url_decode,
     base64url_encode,
     derive_v2_login_keys,
     unwrap_key,
     wrap_key,
 )
+
+
+def crypto_poc() -> None:
+    # 1. Encoding testen
+    original = b"MEGA Encoding Test"
+    encoded = base64url_encode(original)
+    decoded = base64url_decode(encoded)
+
+    assert decoded == original
+    print("[1] Base64url Round-Trip")
+
+    # 2. AES-Key-Wrapping testen
+    master_key = bytes(range(16))
+    key = bytes(range(16, 32))
+
+    wrapped = wrap_key(key, master_key)
+    unwrapped = unwrap_key(wrapped, master_key)
+
+    assert unwrapped == key
+    print("[2] AES-128 Key-Wrapping")
 
 
 class TestBase64URL:
@@ -67,3 +87,7 @@ class TestV2Derivation:
     def test_rejects_empty_salt(self) -> None:
         with pytest.raises(ValueError):
             derive_v2_login_keys("secret", b"")
+
+
+if __name__ == "__main__":
+    pytest.main()
