@@ -5,7 +5,8 @@ Raw RSA is required for compatibility with MEGA's existing login protocol.
 
 from dataclasses import dataclass, field
 
-from mega_cli.crypto.encoding import base64url_decode, base64url_encode, unwrap_key
+from mega_cli.crypto.encoding import base64url_decode, base64url_encode
+from mega_cli.crypto.keys import unwrap_key
 
 SID_LENGTH = 43
 
