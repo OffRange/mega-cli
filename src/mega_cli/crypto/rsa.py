@@ -44,10 +44,6 @@ def parse_mpis(data: bytes, count: int) -> tuple[int, ...]:
 
     The AES-decrypted private key may have up to 15 zero padding bytes.
     """
-    if not isinstance(data, bytes):
-        raise TypeError("MPI data must be bytes")
-    if not isinstance(count, int) or isinstance(count, bool) or count < 1:
-        raise ValueError("MPI count must be a positive integer")
     offset = 0
     values: list[int] = []
     for index in range(count):

@@ -16,11 +16,14 @@ import math
 import os
 from dataclasses import dataclass
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
 from mega_cli.api import BaseCommand, Field, MegaClient
+from mega_cli.crypto import (
+    base64url_decode,
+    decrypt_private_key,
+    decrypt_session_id,
+    derive_v2_login_keys,
+    unwrap_key,
+)
 
 SID_LENGTH = 43
 
@@ -77,81 +80,57 @@ def b64enc(b: bytes) -> str:
 SHORT_PRIVATE_KEY = 3
 
 
-def read_mpis(data: bytes, count: int) -> list[int]:
-    """
-    Based on https://github.com/meganz/sdk/blob/2c95a487b4b297dba1d792c88189d432c3452694/src/crypto/cryptopp.cpp#L1283
-    Read MEGA's multi-precision integers: a 2-byte bit length, then the bytes.
-    """
-    data_len = len(data)
-    values = []
-    pos = 0
-    for _ in range(count):
-        if pos + 2 > data_len:
-            raise ValueError("truncated MPI header")
-
-        bits = int.from_bytes(data[pos : pos + 2], "big")
-        length = (bits + 7) // 8
-        pos += 2
-        if pos + length > data_len:
-            raise ValueError("truncated MPI value")
-
-        values.append(int.from_bytes(data[pos : pos + length], "big"))
-        pos += length
-
-    if data_len - pos >= 16:
-        raise ValueError("too much trailing data (wrong key or malformed input)")
-
-    if count == 3:
-        # u missing: calculate using inverse mod
-        p, q, _ = values
-        u = pow(p, -1, q)
-        values.append(u)
-
-    return values
-
-
 def byte_length(n: int) -> int:
     return math.ceil(n.bit_length() / 8)
 
 
 def main() -> None:
+    email = os.environ["EMAIL"]
+    password = os.environ["PASSWORD"]
+
     with MegaClient() as api:
-        salt = api.request(PreLogin(email=EMAIL)).salt
-        salt = base64.urlsafe_b64decode(salt + "=" * (-len(salt) % 4))
+        # 1. Pre-Login: Salt abrufen
+        prelogin = api.request(PreLogin(email=email))
+        salt = base64url_decode(prelogin.salt)
 
-        kdf = PBKDF2HMAC(hashes.SHA512(), 32, salt, 100_000)
-        key = kdf.derive(PASSWORD.encode("utf-8"))
-        password_key = key[:16]
-        auth_key = key[16:]
-        user_handle = base64.urlsafe_b64encode(auth_key).rstrip(b"=").decode()
+        # 2. Passwort-Key und User-Hash ableiten
+        login_keys = derive_v2_login_keys(password, salt)
 
-        resp = api.request(Login(email=EMAIL, user_handle=user_handle))
-        cipher = Cipher(algorithms.AES128(password_key), modes.ECB()).decryptor()
-        master_key = cipher.update(b64dec(resp.master_key)) + cipher.finalize()
+        # 3. MEGA-Login
+        response = api.request(Login(email=email, user_handle=login_keys.user_hash))
 
-        cipher = Cipher(algorithms.AES128(master_key), modes.ECB()).decryptor()
-        rsa_priv = cipher.update(b64dec(resp.private_key)) + cipher.finalize()
-        prime1, prime2, d, _u = read_mpis(rsa_priv, 4)
-
-        (ciphertext,) = read_mpis(b64dec(resp.encrypted_sid), 1)
-        plain = pow(ciphertext, d, prime1 * prime2)
-
-        # https://github.com/meganz/sdk/blob/2c95a487b4b297dba1d792c88189d432c3452694/src/crypto/cryptopp.cpp#L1147-L1159
-        width = max(
-            byte_length(prime1) + byte_length(prime2) - 2,
-            byte_length(plain),
+        # 4. Master-Key mit AES-128-ECB entschlüsseln
+        master_key = unwrap_key(
+            base64url_decode(response.master_key),
+            login_keys.password_key,
         )
-        sid = plain.to_bytes(width, "big")[:SID_LENGTH]
 
-        # Check user handle
-        if sid[16:27].decode("ascii", "replace") != resp.user_handle:
+        # 5. RSA-Private-Key entschlüsseln und MPIs parsen
+        private_key = decrypt_private_key(
+            response.private_key,
+            master_key,
+        )
+
+        # 6. Verschlüsselte Session-ID mit Raw-RSA entschlüsseln
+        sid = decrypt_session_id(
+            response.encrypted_sid,
+            private_key,
+        )
+
+        # 7. Session-ID überprüfen
+        sid_bytes = base64url_decode(sid)
+
+        if (
+            len(sid_bytes) != 43
+            or sid_bytes[16:27].decode("ascii", "replace") != response.user_handle
+        ):
             raise SystemExit("Session check failed: wrong password or unexpected server response.")
 
-        sid = b64enc(sid)
+        # 8. Session verwenden und Benutzerdaten abrufen
         api.sid = sid
+        user_data = api.request(UserData())
 
-        resp = api.request(UserData())
-        print(json.dumps(resp, indent=2))
+        print(json.dumps(user_data, indent=2))
 
 
 if __name__ == "__main__":

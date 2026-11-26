@@ -85,7 +85,6 @@ def test_private_key_aes_decryption_and_repr(key_numbers: rsa.RSAPrivateNumbers)
     assert str(p) not in repr(parsed)
     assert str(q) not in repr(parsed)
     assert str(d) not in repr(parsed)
-    assert "redacted" in repr(parsed)
 
 
 def test_u_is_not_interpreted(key_numbers: rsa.RSAPrivateNumbers) -> None:

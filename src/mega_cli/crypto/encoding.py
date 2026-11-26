@@ -14,8 +14,6 @@ def base64url_encode(data: bytes) -> str:
 
 def base64url_decode(value: str) -> bytes:
     """Decode padded or unpadded base64url, rejecting malformed input."""
-    if not isinstance(value, str):
-        raise TypeError("value must be str")
     try:
         raw = value.encode("ascii")
     except UnicodeEncodeError as exc:

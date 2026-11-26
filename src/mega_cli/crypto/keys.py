@@ -35,10 +35,6 @@ class V2LoginKeys:
 
 def derive_v2_login_keys(password: str, salt: bytes) -> V2LoginKeys:
     """Derive MEGA v2 login credentials from the password and us0 salt."""
-    if not isinstance(password, str):
-        raise TypeError("password must be str")
-    if not isinstance(salt, bytes):
-        raise TypeError("salt must be bytes")
     if not salt:
         raise ValueError("salt must not be empty")
 
