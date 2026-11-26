@@ -1,8 +1,10 @@
 from mega_cli.crypto.encoding import (
-    AES_BLOCK_SIZE,
-    V2LoginKeys,
     base64url_decode,
     base64url_encode,
+)
+from mega_cli.crypto.keys import (
+    AES_BLOCK_SIZE,
+    V2LoginKeys,
     derive_v2_login_keys,
     unwrap_key,
     wrap_key,

@@ -3,6 +3,8 @@ import pytest
 from mega_cli.crypto.encoding import (
     base64url_decode,
     base64url_encode,
+)
+from mega_cli.crypto.keys import (
     derive_v2_login_keys,
     unwrap_key,
     wrap_key,
