@@ -11,26 +11,19 @@ AES_BLOCK_SIZE = 16
 PBKDF2_ITERATIONS = 100_000
 
 
-def _validate_aes_inputs(data: bytes, key: bytes) -> None:
-    if not isinstance(data, bytes) or not isinstance(key, bytes):
-        raise TypeError("data and key must be bytes")
-    if len(key) != AES_BLOCK_SIZE:
-        raise ValueError("AES-128 key must be exactly 16 bytes")
-    if not data or len(data) % AES_BLOCK_SIZE != 0:
-        raise ValueError("wrapped data must be a nonempty multiple of 16 bytes")
-
-
 def wrap_key(plaintext_key: bytes, wrapping_key: bytes) -> bytes:
     """MEGA key wrapping: AES-128-ECB, no padding, arbitrary full blocks."""
-    _validate_aes_inputs(plaintext_key, wrapping_key)
-    encryptor = Cipher(algorithms.AES(wrapping_key), modes.ECB()).encryptor()
+    if not plaintext_key:
+        raise ValueError("key data must not be empty")
+    encryptor = Cipher(algorithms.AES128(wrapping_key), modes.ECB()).encryptor()
     return encryptor.update(plaintext_key) + encryptor.finalize()
 
 
 def unwrap_key(wrapped_key: bytes, wrapping_key: bytes) -> bytes:
     """Undo MEGA AES-128-ECB key wrapping (no padding)."""
-    _validate_aes_inputs(wrapped_key, wrapping_key)
-    decryptor = Cipher(algorithms.AES(wrapping_key), modes.ECB()).decryptor()
+    if not wrapped_key:
+        raise ValueError("key data must not be empty")
+    decryptor = Cipher(algorithms.AES128(wrapping_key), modes.ECB()).decryptor()
     return decryptor.update(wrapped_key) + decryptor.finalize()
 
 
