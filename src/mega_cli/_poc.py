@@ -9,10 +9,8 @@ Run it with:
 - plain: ``python -m mega_cli._poc``
 """
 
-import base64
 import json
 import logging
-import math
 import os
 from dataclasses import dataclass
 
@@ -24,8 +22,6 @@ from mega_cli.crypto import (
     derive_v2_login_keys,
     unwrap_key,
 )
-
-SID_LENGTH = 43
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -65,71 +61,30 @@ class UserData(BaseCommand, name="ug"):
     v: int = 1
 
 
-EMAIL = os.environ["EMAIL"]
-PASSWORD = os.environ["PASSWORD"]
-
-
-def b64dec(s: str) -> bytes:
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
-
-
-def b64enc(b: bytes) -> str:
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
-
-
-SHORT_PRIVATE_KEY = 3
-
-
-def byte_length(n: int) -> int:
-    return math.ceil(n.bit_length() / 8)
-
-
 def main() -> None:
     email = os.environ["EMAIL"]
     password = os.environ["PASSWORD"]
 
     with MegaClient() as api:
-        # 1. Pre-Login: Salt abrufen
         prelogin = api.request(PreLogin(email=email))
         salt = base64url_decode(prelogin.salt)
-
-        # 2. Passwort-Key und User-Hash ableiten
         login_keys = derive_v2_login_keys(password, salt)
 
-        # 3. MEGA-Login
         response = api.request(Login(email=email, user_handle=login_keys.user_hash))
+        master_key = unwrap_key(base64url_decode(response.master_key), login_keys.password_key)
+        private_key = decrypt_private_key(response.private_key, master_key)
+        sid = decrypt_session_id(response.encrypted_sid, private_key)
 
-        # 4. Master-Key mit AES-128-ECB entschlüsseln
-        master_key = unwrap_key(
-            base64url_decode(response.master_key),
-            login_keys.password_key,
-        )
-
-        # 5. RSA-Private-Key entschlüsseln und MPIs parsen
-        private_key = decrypt_private_key(
-            response.private_key,
-            master_key,
-        )
-
-        # 6. Verschlüsselte Session-ID mit Raw-RSA entschlüsseln
-        sid = decrypt_session_id(
-            response.encrypted_sid,
-            private_key,
-        )
-
-        # 7. Session-ID überprüfen
+        # Verify the expected user handle without exposing session material.
         sid_bytes = base64url_decode(sid)
-
         if (
             len(sid_bytes) != 43
             or sid_bytes[16:27].decode("ascii", "replace") != response.user_handle
         ):
             raise SystemExit("Session check failed: wrong password or unexpected server response.")
 
-        # 8. Session verwenden und Benutzerdaten abrufen
         api.sid = sid
         user_data = api.request(UserData())
-
         print(json.dumps(user_data, indent=2))
 
 
